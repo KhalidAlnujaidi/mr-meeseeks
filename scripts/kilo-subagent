@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# kilo-subagent — delegate a one-shot task to Kilo Code on its FREE tier models.
+#
+# Picks a RANDOM free model from a pool of models verified to work WITHOUT
+# sign-in (tested 2026-09-17). Retries the next random model on failure/timeout,
+# so one slow or flaky model never wedges the run.
+#
+# Usage:
+#   kilo-subagent "task description"
+#   kilo-subagent -f context.py "Add docstrings to every function"
+#   kilo-subagent -n 3 "task"          # try up to 3 different models
+#   echo "code" | kilo-subagent "task"
+#
+# Env:
+#   KILO_SUBAGENT_TIMEOUT  per-attempt seconds (default 180)
+#   KILO_SUBAGENT_MODELS   override pool, space-separated
+#   KILO_SUBAGENT_SEED     fix RNG for reproducibility
+#   KILO_SUBAGENT_DRYRUN=1 print the plan without calling kilo
+
+set -uo pipefail
+
+# Free-tier models verified reachable with NO sign-in required.
+# Excluded after testing: muse-spark-1.3* (requires sign-in),
+# openrouter/google/gemma-4-31b-it:free and kilo/liquid/lfm-2.5-2.6b:free (hang).
+DEFAULT_POOL=(
+  "kilo/nvidia/nemotron-3.5-lightning:free"
+  "kilo/poolside/laguna-s-2.1:free"
+  "kilo/inclusionai/ling-3.0-flash-vl:free"
+  "kilo/nex-agi/nex-n2.5-pro:free"
+)
+
+TIMEOUT="${KILO_SUBAGENT_TIMEOUT:-180}"
+MAX_ATTEMPTS=3
+FILES=()
+READONLY=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -f) FILES+=("$2"); shift 2 ;;
+    -n) MAX_ATTEMPTS="$2"; shift 2 ;;
+    -r|--readonly) READONLY=1; shift ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    *) break ;;
+  esac
+done
+
+# Kilo is an AGENT: by default it will edit/create files to satisfy the task,
+# mutating your working tree. --readonly prefixes the task with an explicit
+# no-write instruction and tells it to return the result as text/markdown.
+READONLY_PREFIX="IMPORTANT: Do not create, edit, or write any files. Do not run commands with side effects. Analyze and return your answer purely as text in your reply."
+
+TASK="${1:-}"
+if [ -z "$TASK" ]; then
+  echo "error: no task given. Try: kilo-subagent -h" >&2
+  exit 2
+fi
+
+# Piped stdin becomes extra context.
+if [ ! -t 0 ]; then
+  PIPED="$(cat)"
+  [ -n "$PIPED" ] && TASK="$TASK
+
+Context:
+$PIPED"
+fi
+
+if [ -n "${KILO_SUBAGENT_MODELS:-}" ]; then
+  read -r -a POOL <<< "$KILO_SUBAGENT_MODELS"
+else
+  POOL=("${DEFAULT_POOL[@]}")
+fi
+
+# macOS ships bash 3.2: no mapfile, and RANDOM is fine.
+pick_random() {
+  local n=${#POOL[@]}
+  if [ -n "${KILO_SUBAGENT_SEED:-}" ]; then
+    RANDOM="$KILO_SUBAGENT_SEED"
+  fi
+  echo $(( RANDOM % n ))
+}
+
+echo "[kilo-subagent] pool (${#POOL[@]} free models):" >&2
+for m in "${POOL[@]}"; do echo "  - $m" >&2; done
+
+if [ "${KILO_SUBAGENT_DRYRUN:-}" = "1" ]; then
+  echo "[kilo-subagent] dry run; no models called." >&2
+  exit 0
+fi
+
+# Try distinct models, in random order.
+ORDER=()
+for ((i=0; i<${#POOL[@]}; i++)); do ORDER+=("$i"); done
+
+attempt=0
+while [ "$attempt" -lt "$MAX_ATTEMPTS" ] && [ "${#ORDER[@]}" -gt 0 ]; do
+  idx=$(pick_random)
+  # Clamp in case RANDOM landed out of range.
+  [ "$idx" -ge "${#ORDER[@]}" ] && idx=0
+
+  m="${POOL[${ORDER[$idx]}]}"
+  unset 'ORDER[$idx]'
+  # Re-densify the array (bash 3.2 has no sparse-array compaction).
+  ORDER=("${ORDER[@]}")
+
+  attempt=$((attempt+1))
+  echo "[kilo-subagent] attempt $attempt/$MAX_ATTEMPTS -> $m (timeout ${TIMEOUT}s)" >&2
+
+  ARGS=(run -m "$m")
+  for f in "${FILES[@]:-}"; do
+    [ -n "$f" ] && ARGS+=(-f "$f")
+  done
+  # `--` is REQUIRED: `-f` is greedy and will otherwise swallow the task text
+  # as another filename ("Error: File not found: <your task>").
+  if [ "$READONLY" = "1" ]; then
+    ARGS+=(-- "$READONLY_PREFIX"$'\n\n'"$TASK")
+  else
+    ARGS+=(-- "$TASK")
+  fi
+
+  # Portable timeout: background the call, poll, kill on expiry.
+  OUT="$(mktemp)"
+  ( kilo "${ARGS[@]}" >"$OUT" 2>&1 ) &
+  pid=$!
+  waited=0
+  while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$TIMEOUT" ]; do
+    sleep 1
+    waited=$((waited+1))
+  done
+
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null
+    sleep 1
+    kill -KILL "$pid" 2>/dev/null
+    echo "[kilo-subagent] TIMEOUT after ${TIMEOUT}s on $m; trying another model" >&2
+    rm -f "$OUT"
+    continue
+  fi
+
+  wait "$pid" 2>/dev/null
+  rc=$?
+  BODY="$(cat "$OUT")"
+  rm -f "$OUT"
+
+  if [ "$rc" -eq 0 ] && ! grep -qiE 'need to sign in|not signed in|insufficient|quota|rate limit|Error:' <<<"$BODY"; then
+    # Strip kilo's banner line ("> code · provider/model") then emit the answer.
+    sed '/^> code · /d' <<<"$BODY" | sed '/^[[:space:]]*$/d'
+    echo "[kilo-subagent] OK via $m (attempt $attempt)" >&2
+    exit 0
+  fi
+
+  echo "[kilo-subagent] FAILED on $m (rc=$rc); trying another model" >&2
+  echo "$BODY" | tail -3 >&2
+done
+
+echo "[kilo-subagent] all $MAX_ATTEMPTS attempt(s) failed." >&2
+exit 1

@@ -1,0 +1,3 @@
+name: Budget-AGI
+description: Brain-and-swarm orchestrator. The main session thinks, decides, and verifies; all labor (coding, search, analysis) delegates to Mr. Meeseeks teams by default.
+order: 2

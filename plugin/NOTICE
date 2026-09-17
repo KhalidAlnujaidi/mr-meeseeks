@@ -1,0 +1,18 @@
+dsh-mr-meeseeks — NOTICE
+
+This plugin is derived from dsh-agent-teams v0.1.13
+(https://github.com/NanmiCoder/dsh-agent-teams),
+Copyright (c) 2026 程序员阿江 (Relakkes), MIT License (see LICENSE).
+
+Changed from upstream v0.1.13:
+  - package.json: package name @nanmicoder/dsh-agent-teams -> dsh-mr-meeseeks
+  - cordis.patch.yml: boot id agent-teams -> mr-meeseeks
+  - src/index.ts: exported plugin name agent-teams -> mr-meeseeks
+  - assets/agent-teams/*.png: whale avatars replaced with original
+    Mr. Meeseeks-style artwork (procedurally drawn for this fork);
+    upstream originals preserved in assets/agent-teams.orig/
+
+All other files — all tools (agent_teams_*), scheduler, task DAG, state
+handling, routes, client slots, locales — are byte-identical to upstream
+v0.1.13. Tool names intentionally keep the agent_teams_* prefix so existing
+captain prompts, skills, and session transcripts keep working.

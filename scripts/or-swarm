@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""or-free-swarm — spawn a parallel swarm of OpenRouter FREE models.
+
+Lane 1: direct OpenRouter API calls (no CLI overhead, true parallelism).
+Lane 2 (--via-kilo): delegate through `kilo run` free tier for agentic tasks.
+
+Models are drawn from a pool that was VERIFIED live (HTTP 200 + real completion),
+not merely listed as $0 in the catalog. See FREE_MODELS below for provenance.
+
+Usage:
+  or-swarm "Summarize this" -i file.md
+  or-swarm "Explain X" -n 8 --models stealth/union-alpha
+  or-swarm "task" -n 6 --mix            # rotate across all verified models
+  or-swarm "task" --via-kilo            # agentic lane through kilo
+
+Env:
+  OPENROUTER_API_KEY   required for lane 1 (read from env, not hardcoded)
+"""
+
+from __future__ import annotations
+
+import argparse
+import concurrent.futures as cf
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+API = "https://openrouter.ai/api/v1/chat/completions"
+
+# Verified live on 2026-09-17: returned HTTP 200 + a real completion at cost 0.
+# `verified` is honest provenance — extend only after actually calling it.
+FREE_MODELS: list[dict] = [
+    {"id": "stealth/union-alpha",                        "ctx": 262_144, "verified": True,
+     "note": "GPQA-D 90.9%, tool-err 0.95%. Stealth: provider MAY RETAIN prompts (not trained on). ~20 tok/s."},
+    {"id": "nex-agi/nex-n2.5-pro:free",                  "ctx": 262_144, "verified": True,
+     "note": "reasoning model - needs ample max_tokens."},
+    {"id": "nex-agi/nex-n2.5-mini:free",                 "ctx": 262_144, "verified": True,
+     "note": "reasoning model - needs ample max_tokens."},
+    {"id": "cohere/north-mini-code:free",                "ctx": 256_000, "verified": True,
+     "note": "Cohere agentic coding, 30B/3B active, Apache-2.0."},
+    {"id": "dots-studio/dots-3-note-preview:free",       "ctx": 512_000, "verified": True,
+     "note": "512K context, reasoning."},
+    {"id": "inclusionai/ling-3.0-flash-vl:free",         "ctx": 262_144, "verified": True,
+     "note": "multimodal, reasoning."},
+    {"id": "inclusionai/ling-3.0-flash-sante:free",      "ctx": 262_144, "verified": True,
+     "note": "reasoning."},
+    {"id": "poolside/laguna-s-2.1:free",                 "ctx": 262_144, "verified": False,
+     "note": "118B/8B-active coding agent. BLOCKED until OpenRouter privacy toggle 'Allow free endpoints that train on request data' is ON."},
+    {"id": "nvidia/nemotron-3.5-lightning:free",         "ctx": 1_000_000, "verified": False,
+     "note": "1M context. Also needs the training toggle."},
+    {"id": "thinkingmachines/inkling-small:free",        "ctx": 1_048_576, "verified": False,
+     "note": "REJECTED: 'only available on agentic harnesses' - cannot be called directly."},
+]
+
+# Reasoning models burn tokens on hidden reasoning first; a small max_tokens
+# returns EMPTY content. Always give them room.
+MIN_TOKENS_FOR_REASONING = 400
+
+POOL = {m["id"]: m for m in FREE_MODELS}
+KILO_POOL = [m["id"] for m in FREE_MODELS if m["verified"] and not m["id"].startswith(("google/", "stealth/"))]
+
+
+def call_openrouter(model: str, prompt: str, max_tokens: int, timeout: int) -> dict:
+    key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not key:
+        return {"model": model, "ok": False, "error": "OPENROUTER_API_KEY not set"}
+
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+    }).encode()
+
+    req = urllib.request.Request(
+        API, data=body, method="POST",
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            # OpenRouter recommends identifying your app.
+            "HTTP-Referer": "https://localhost/or-free-swarm",
+            "X-Title": "or-free-swarm",
+        },
+    )
+
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            payload = json.loads(r.read().decode())
+        dt = time.time() - t0
+        choice = (payload.get("choices") or [{}])[0]
+        text = ((choice.get("message") or {}).get("content") or "").strip()
+        usage = payload.get("usage") or {}
+        return {
+            "model": model, "ok": bool(text), "text": text, "seconds": round(dt, 2),
+            "cost": usage.get("cost", 0), "tokens": usage.get("total_tokens"),
+            "finish": choice.get("finish_reason"),
+            "error": None if text else "empty completion",
+        }
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:300]
+        return {"model": model, "ok": False, "seconds": round(time.time() - t0, 2),
+                "error": f"HTTP {e.code}: {detail}"}
+    except Exception as e:  # noqa: BLE001 - surface any transport failure honestly
+        return {"model": model, "ok": False, "seconds": round(time.time() - t0, 2),
+                "error": f"{type(e).__name__}: {e}"}
+
+
+def call_kilo(model: str, prompt: str, timeout: int) -> dict:
+    """Agentic lane: route through the kilo-subagent wrapper's free tier."""
+    wrapper = Path.home() / ".local" / "bin" / "kilo-subagent"
+    if not wrapper.exists():
+        return {"model": model, "ok": False, "error": f"wrapper missing at {wrapper}"}
+    t0 = time.time()
+    try:
+        p = subprocess.run(
+            [str(wrapper), "-r", "-n", "1", prompt],
+            capture_output=True, text=True, timeout=timeout,
+            env={**os.environ, "KILO_SUBAGENT_MODELS": model},
+        )
+        out = (p.stdout or "").strip()
+        return {"model": model, "ok": bool(out) and p.returncode == 0,
+                "text": out, "seconds": round(time.time() - t0, 2),
+                "error": None if out else (p.stderr or "")[-200:]}
+    except subprocess.TimeoutExpired:
+        return {"model": model, "ok": False, "seconds": round(time.time() - t0, 2),
+                "error": f"timeout after {timeout}s"}
+    except Exception as e:  # noqa: BLE001
+        return {"model": model, "ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Parallel swarm over OpenRouter free models.")
+    ap.add_argument("task", help="the task/prompt to fan out")
+    ap.add_argument("-n", "--agents", type=int, default=1, help="number of parallel calls (default 1)")
+    ap.add_argument("-m", "--models", help="comma-separated model ids (default: auto)")
+    ap.add_argument("-i", "--input-file", help="file whose contents are prepended as context")
+    ap.add_argument("--mix", action="store_true", help="rotate across ALL verified models per agent")
+    ap.add_argument("--via-kilo", action="store_true", help="use the kilo free-tier agent lane")
+    ap.add_argument("--max-tokens", type=int, default=1024,
+                    help=f"default 1024; reasoning models return EMPTY below ~{MIN_TOKENS_FOR_REASONING}")
+    ap.add_argument("--timeout", type=int, default=300, help="per-call timeout seconds")
+    ap.add_argument("--json", action="store_true", help="emit raw JSON results")
+    ap.add_argument("--list", action="store_true", help="print the model pool and exit")
+    args = ap.parse_args()
+
+    if args.list:
+        print(f"{'model':<45} {'ctx':>9}  verified  note")
+        for m in FREE_MODELS:
+            print(f"{m['id']:<45} {m['ctx']:>9}  {'yes' if m['verified'] else 'no ':>8}  {m['note']}")
+        return 0
+
+    prompt = args.task
+    if args.input_file:
+        prompt = f"{Path(args.input_file).read_text()}\n\n---\n{args.task}"
+
+    # Choose models: explicit > mix > default single.
+    if args.models:
+        models = [m.strip() for m in args.models.split(",") if m.strip()]
+    elif args.mix:
+        models = [m["id"] for m in FREE_MODELS if m["verified"]]
+    else:
+        models = []
+    if not models:
+        models = ["stealth/union-alpha"]
+
+    # Build the agent list: one entry per parallel agent, rotating over models.
+    agents = [models[i % len(models)] for i in range(max(1, args.agents))]
+
+    runner = call_kilo if args.via_kilo else call_openrouter
+    label = "kilo free-tier agent lane" if args.via_kilo else "OpenRouter free lane"
+    print(f"[swarm] {len(agents)} agent(s) via {label}", file=sys.stderr)
+    for i, m in enumerate(agents):
+        print(f"[swarm]   agent {i+1}: {m}", file=sys.stderr)
+
+    t0 = time.time()
+    with cf.ThreadPoolExecutor(max_workers=len(agents)) as ex:
+        if args.via_kilo:
+            futs = [ex.submit(runner, m, prompt, args.timeout) for m in agents]
+        else:
+            futs = [ex.submit(runner, m, prompt, args.max_tokens, args.timeout) for m in agents]
+        results = [f.result() for f in cf.as_completed(futs)]
+    wall = round(time.time() - t0, 2)
+
+    ok = [r for r in results if r.get("ok")]
+    # Cost is REAL data from the API (should be 0) - report it, never invent it.
+    total_cost = sum(float(r.get("cost") or 0) for r in results)
+
+    if args.json:
+        print(json.dumps({"wall_seconds": wall, "results": results}, indent=2))
+    else:
+        print(f"\n===== {len(ok)}/{len(results)} succeeded in {wall}s wall  (cost ${total_cost:.4f}) =====\n")
+        for r in sorted(results, key=lambda x: not x.get("ok")):
+            head = f"--- {r['model']} ({r.get('seconds','?')}s)"
+            if not r.get("ok"):
+                print(f"{head}\n  FAILED: {r.get('error')}\n")
+                continue
+            print(f"{head}\n{r.get('text','')}\n")
+
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
