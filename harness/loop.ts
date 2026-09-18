@@ -395,6 +395,162 @@ export function isAtomicV2(criterion: string): boolean {
   return s.files <= 1 && s.tools <= 1 && s.roles <= 1;
 }
 
+/**
+ * R6-B: filename stoplist + path-token exclusion for the verb scan
+ * (additive-only: scopeCounts/isAtomicV2 untouched, R6-A experiments
+ * independently on its own leaf).
+ * Root cause: SCOPE_VERBS `read\w*` matches inside the filename README,
+ * so "Fix typo in README" counted tools={fix,read} → false split.
+ * Fix has two parts: (1) FILENAME_STOPLIST — bare filenames that never
+ * count as verbs (catches extensionless "README"); (2) verbs must appear
+ * OUTSIDE any <path>.<ext> token, so path tokens are space-masked before
+ * the verb scan (catches "README.md", "reader.ts", ...). File/role axes
+ * reuse the v2 logic on the original text; only the verb scan changes.
+ * A genuine verb adjacent to a path still counts: "Read README.md to
+ * find the install command" masks the path but keeps the leading "Read".
+ */
+export const FILENAME_STOPLIST = new Set([
+  "readme", "changelog", "changes", "license", "licence", "copying",
+  "contributing", "authors", "notice", "todo", "roadmap", "codeowners",
+  "package", "makefile", "dockerfile",
+]);
+
+const STOP_WORD = /\b[\w-]+\b/g;
+
+/** Space-mask every path token so verbs inside paths never match. */
+export function maskPathTokens(criterion: string): string {
+  return criterion.replace(PATH_TOKEN, (m) => " ".repeat(m.length));
+}
+
+/** Space-mask bare stoplist filenames (exact name match, case-insensitive). */
+export function maskStoplistNames(text: string): string {
+  return text.replace(STOP_WORD, (w) =>
+    FILENAME_STOPLIST.has(w.toLowerCase()) ? " ".repeat(w.length) : w,
+  );
+}
+
+export function scopeCountsB(criterion: string): ScopeCounts {
+  const paths = new Set(
+    (criterion.match(PATH_TOKEN) ?? []).map((p) => p.toLowerCase()),
+  );
+  let files = paths.size;
+  if (PLURAL_SCOPE.test(criterion)) files = Math.max(files, 2);
+  const masked = maskStoplistNames(maskPathTokens(criterion));
+  const lower = ` ${masked.toLowerCase()} `;
+  const tools = new Set(
+    SCOPE_VERBS.filter((v) => new RegExp(`[^\\w]${v}\\w*[^\\w]`).test(lower)),
+  );
+  // verif* and render* listed with stems; dedupe stems that double-match.
+  const toolsNorm = new Set(
+    [...tools].map((v) => v.replace(/^(verif|compil).*/, "$1").replace(/^(render).*/, "rend")),
+  );
+  const roles = new Set(ROLE_WORDS.filter((r) => lower.includes(` ${r} `)));
+  return { files, tools: toolsNorm.size, roles: roles.size };
+}
+
+/** R6-B atomicity (1 leaf): v1 gate + stoplist/path-excluded scope axes. */
+export function isAtomicV2B(criterion: string): boolean {
+  if (!isAtomic(criterion)) return false;
+  const s = scopeCountsB(criterion);
+  return s.files <= 1 && s.tools <= 1 && s.roles <= 1;
+}
+
+/**
+ * R6-A: word-boundary-aware verb matching (additive-only: scopeCounts/
+ * isAtomicV2/scopeCountsB/isAtomicV2B untouched, R6-B experiments
+ * independently on its own leaf).
+ * Root cause: the v2 verb scan `read\w*` matches the substring "read"
+ * inside the bare path-token word "README" ("Fix typo in README" counted
+ * tools={fix,read} → false split). Two additive changes, both confined
+ * to this leaf's scan:
+ * (1) maskPathTokens() first, so verbs inside <path>.<ext> / a/b tokens
+ * never match ("README.md", "reader.ts", ...);
+ * (2) boundary-aware match: verb stem + ONLY a known inflectional suffix
+ * (s|es|ed|ing|d), then a real word boundary — so "README" (stem "read"
+ * + "me", not a verb suffix) never counts, while "reads/reading/fixed/
+ * verified" still do. Stems that are already full words in SCOPE_VERBS
+ * ("read" etc.) also accept the empty suffix.
+ * A genuine verb adjacent to a path still counts: "Read README.md to
+ * find the install command" masks the path but keeps the leading "Read".
+ */
+const VERB_SUFFIX = "(?:s|es|ed|ing|d)?";
+
+export function scopeCountsA(criterion: string): ScopeCounts {
+  const paths = new Set(
+    (criterion.match(PATH_TOKEN) ?? []).map((p) => p.toLowerCase()),
+  );
+  let files = paths.size;
+  if (PLURAL_SCOPE.test(criterion)) files = Math.max(files, 2);
+  const masked = maskPathTokens(criterion);
+  const lower = ` ${masked.toLowerCase()} `;
+  const tools = new Set(
+    SCOPE_VERBS.filter((v) =>
+      new RegExp(`[^\\w]${v}${VERB_SUFFIX}(?![\\w])`).test(lower)
+    ),
+  );
+  // verif* and render* listed with stems; dedupe stems that double-match.
+  const toolsNorm = new Set(
+    [...tools].map((v) => v.replace(/^(verif|compil).*/, "$1").replace(/^(render).*/, "rend")),
+  );
+  const roles = new Set(ROLE_WORDS.filter((r) => lower.includes(` ${r} `)));
+  return { files, tools: toolsNorm.size, roles: roles.size };
+}
+
+/** R6-A atomicity (1 leaf): v1 gate + boundary-aware scope axes. */
+export function isAtomicV2A(criterion: string): boolean {
+  if (!isAtomic(criterion)) return false;
+  const s = scopeCountsA(criterion);
+  return s.files <= 1 && s.tools <= 1 && s.roles <= 1;
+}
+
+/**
+ * R6-C hybrid: A engine + B net (additive-only: scopeCounts/
+ * isAtomicV2/scopeCountsA/isAtomicV2A/scopeCountsB/isAtomicV2B untouched,
+ * R6-A and R6-B keep experimenting independently on their own leaves).
+ * Conjecture: A-only misses bare extensionless stoplist-adjacent forms
+ * that are not clean verb inflections of another reading (belt), while
+ * B-only keeps the loose `read\w*` scan, so a non-stoplist filename with a
+ * verb-stem prefix + non-inflectional tail (e.g. a hypothetical
+ * "readinglist" token) would still false-positive (suspenders). C layers
+ * both: keep A's boundary-aware verb scan as the engine
+ * (stem + VERB_SUFFIX + word boundary), and layer B's FILENAME_STOPLIST
+ * as a pre-mask safety net. Order is stoplist-first:
+ * maskStoplistNames BEFORE maskPathTokens, so a stoplist name nested
+ * inside a dotted path ("docs/README.md") is blanked by the stoplist net
+ * even where path-token masking leaves partial coverage, and the engine
+ * then scans the fully-masked text with A's inflection discipline.
+ * Genuine verbs adjacent to paths still count: "Read README.md ..."
+ * keeps the leading "Read" (neither mask touches a standalone verb
+ * outside the path/stoplist tokens).
+ */
+export function scopeCountsC(criterion: string): ScopeCounts {
+  const paths = new Set(
+    (criterion.match(PATH_TOKEN) ?? []).map((p) => p.toLowerCase()),
+  );
+  let files = paths.size;
+  if (PLURAL_SCOPE.test(criterion)) files = Math.max(files, 2);
+  const masked = maskPathTokens(maskStoplistNames(criterion));
+  const lower = ` ${masked.toLowerCase()} `;
+  const tools = new Set(
+    SCOPE_VERBS.filter((v) =>
+      new RegExp(`[^\\w]${v}${VERB_SUFFIX}(?![\\w])`).test(lower)
+    ),
+  );
+  // verif* and render* listed with stems; dedupe stems that double-match.
+  const toolsNorm = new Set(
+    [...tools].map((v) => v.replace(/^(verif|compil).*/, "$1").replace(/^(render).*/, "rend")),
+  );
+  const roles = new Set(ROLE_WORDS.filter((r) => lower.includes(` ${r} `)));
+  return { files, tools: toolsNorm.size, roles: roles.size };
+}
+
+/** R6-C atomicity (1 leaf): v1 gate + hybrid A-engine/B-net scope axes. */
+export function isAtomicV2C(criterion: string): boolean {
+  if (!isAtomic(criterion)) return false;
+  const s = scopeCountsC(criterion);
+  return s.files <= 1 && s.tools <= 1 && s.roles <= 1;
+}
+
 export interface ChildSpec { role: Role; criterion: string; workerModel?: string; }
 
 export class HomogeneousAssignment extends Error {
@@ -504,7 +660,7 @@ export function splitOnce(
 // --- t8 smoke test drives enqueue→claim→do→report→verify→split→requeue ---
 
 function usage(): never {
-  console.error("usage: node harness/loop.ts <enqueue|claim|poll|show|prompt|report|verify|split|atomic|atomic2> [args...]");
+  console.error("usage: node harness/loop.ts <enqueue|claim|poll|show|prompt|report|verify|split|atomic|atomic2|atomic2a|atomic2b|atomic2c> [args...]");
   process.exit(1);
 }
 
@@ -579,6 +735,27 @@ if (cmd === "enqueue") {
   const s = scopeCounts(criterion);
   console.log(isAtomicV2(criterion) ? "atomic" : "split");
   console.log(`[scope files=${s.files} tools=${s.tools} roles=${s.roles}]`);
+} else if (cmd === "atomic2a") {
+  // atomic2a <criterion...>: R6-A boundary-aware verb scope check (additive).
+  const criterion = args.join(" ");
+  if (!criterion) usage();
+  const s = scopeCountsA(criterion);
+  console.log(isAtomicV2A(criterion) ? "atomic" : "split");
+  console.log(`[scopeA files=${s.files} tools=${s.tools} roles=${s.roles}]`);
+} else if (cmd === "atomic2b") {
+  // atomic2b <criterion...>: R6-B filename-stoplist + path-exclusion scope check (additive).
+  const criterion = args.join(" ");
+  if (!criterion) usage();
+  const s = scopeCountsB(criterion);
+  console.log(isAtomicV2B(criterion) ? "atomic" : "split");
+  console.log(`[scopeB files=${s.files} tools=${s.tools} roles=${s.roles}]`);
+} else if (cmd === "atomic2c") {
+  // atomic2c <criterion...>: R6-C hybrid (A engine + B stoplist net) scope check (additive).
+  const criterion = args.join(" ");
+  if (!criterion) usage();
+  const s = scopeCountsC(criterion);
+  console.log(isAtomicV2C(criterion) ? "atomic" : "split");
+  console.log(`[scopeC files=${s.files} tools=${s.tools} roles=${s.roles}]`);
 } else if (cmd === "split") {
   // split <id> <model> [--budget N] [--norm] [--models m1,m2,...] <role[@workerModel]:criterion> [...]
   // R2-B: per-child worker model via role@model: prefix or --models list (additive).
