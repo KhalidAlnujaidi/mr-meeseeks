@@ -234,6 +234,60 @@ export function report(id: string, result: string, model: string, cost: Cost = Z
 }
 
 /**
+ * R5-B: normalized model-id compare (compare-only, never rewrites stored ids).
+ * normModel() strips provider/routing prefixes (kilo/, openrouter/,
+ * kilo//openrouter/, org/ — anything before the last "/"), strips a
+ * trailing ":free" suffix, trims whitespace, lowercases. Raw ids stay on
+ * task records + ledger lines; normalization applies ONLY at compare sites
+ * (verify worker-match, correlated-blindness, hetero distinctness).
+ * sameModel(a, b) is the normalized equality predicate (1 leaf).
+ */
+export function normModel(id: string): string {
+  let s = (id ?? "").trim().toLowerCase();
+  if (s.endsWith(":free")) s = s.slice(0, -":free".length);
+  // Strip provider/routing prefix path: compare on the basename so routed
+  // equivalents match. Empty segments (kilo//openrouter/) are dropped so
+  // the double-slash form collapses to the same basename.
+  const parts = s.split("/").filter((p) => p.length > 0);
+  return parts.length > 0 ? parts[parts.length - 1] : s;
+}
+
+/** Normalized model-id equality: true iff normModel(a) === normModel(b). */
+export function sameModel(a: string, b: string): boolean {
+  return normModel(a) === normModel(b);
+}
+
+/**
+ * R5-A: mismatch hint for the strict worker-model compare (additive-only).
+ * The compare itself stays byte-exact (silent substitution stays a refusal);
+ * errHint() only enriches the refusal message with both ids, a
+ * "did you mean X?" pointer at the assigned form, and the likely cause
+ * (:free suffix / provider prefix / casing / whitespace) when detectable.
+ */
+export function errHint(assigned: string, got: string): string {
+  const hints: string[] = [];
+  const stripFree = (m: string): string => (m.endsWith(":free") ? m.slice(0, -":free".length) : m);
+  const tail = (m: string): string => {
+    const i = m.lastIndexOf("/");
+    return i < 0 ? m : m.slice(i + 1);
+  };
+  if (assigned !== got && stripFree(assigned) === stripFree(got)) {
+    hints.push("check :free suffix");
+  }
+  if (stripFree(assigned) !== stripFree(got) && tail(stripFree(assigned)) === tail(stripFree(got))) {
+    hints.push("check provider prefix");
+  }
+  if (assigned !== got && assigned.toLowerCase() === got.toLowerCase()) {
+    hints.push("check casing (compare is case-sensitive)");
+  }
+  if (assigned.trim() !== assigned || got.trim() !== got) {
+    hints.push("check leading/trailing whitespace");
+  }
+  const cause = hints.length > 0 ? `likely cause: ${hints.join("; ")}` : "ids differ";
+  return `did you mean '${assigned}'? ${cause}. re-run verify with workerModel exactly as assigned.`;
+}
+
+/**
  * verify(): done -> verified|failed. Collapse event, one verify ledger line.
  * Enforces cross-model verification (correlated-blindness rule: reviewer model
  * MUST differ from worker model) and reviewer read-only discipline (verify
@@ -241,18 +295,22 @@ export function report(id: string, result: string, model: string, cost: Cost = Z
  */
 export function verify(
   id: string, verdict: "pass" | "fail",
-  opts: { reviewerModel: string; workerModel: string; reason: string; cost?: Cost },
+  opts: { reviewerModel: string; workerModel: string; reason: string; cost?: Cost; normalizeModels?: boolean },
 ): Task {
   const t = loadTask(id);
   if (t.status !== "done") throw new Error(`task ${id} must be reported before verify (status=${t.status})`);
   if (!opts.reason) throw new Error("verify requires a one-sentence reason");
-  if (opts.reviewerModel === opts.workerModel) {
+  // R5-B: opt-in normalized compare (default strict — R5-A intact).
+  // normalizeModels=true compares via sameModel(); raw ids stay on records/ledger.
+  const norm = opts.normalizeModels ?? false;
+  const modelsEqual = (a: string, b: string): boolean => (norm ? sameModel(a, b) : a === b);
+  if (modelsEqual(opts.reviewerModel, opts.workerModel)) {
     throw new Error(`correlated blindness: reviewer model must differ from worker model (${opts.workerModel})`);
   }
   // R2-B: verify only CONFIRMS the split-time workerModel record (additive:
   // tasks without a record skip this check). Assignment was decided at split.
-  if (t.workerModel && t.workerModel !== opts.workerModel) {
-    throw new Error(`worker model mismatch: split assigned ${t.workerModel}, verify got ${opts.workerModel}`);
+  if (t.workerModel && !modelsEqual(t.workerModel, opts.workerModel)) {
+    throw new Error(`worker model mismatch: split assigned '${t.workerModel}', verify got '${opts.workerModel}'. ${errHint(t.workerModel, opts.workerModel)}`);
   }
   t.status = verdict === "pass" ? "verified" : "failed";
   saveTask(t);
@@ -345,9 +403,18 @@ export class HomogeneousAssignment extends Error {
   }
 }
 
-/** Distinct non-empty worker models in a sibling set. */
+/** Distinct non-empty worker models in a sibling set (strict, raw strings). */
 export function distinctWorkerModels(models: (string | undefined)[]): string[] {
   return [...new Set(models.filter((m): m is string => !!m && m.trim().length > 0))];
+}
+
+/**
+ * R5-B: distinct non-empty worker models under normalized compare.
+ * Additive alongside strict distinctWorkerModels: normModel each id, then
+ * dedupe. Raw strings are preserved by callers (compare-only).
+ */
+export function distinctWorkerModelsNorm(models: (string | undefined)[]): string[] {
+  return [...new Set(models.filter((m): m is string => !!m && m.trim().length > 0).map((m) => normModel(m!)))];
 }
 
 /**
@@ -360,7 +427,7 @@ export function distinctWorkerModels(models: (string | undefined)[]): string[] {
  */
 export function splitOnce(
   id: string, children: ChildSpec[], model: string,
-  opts: { budgetMax?: number; cost?: Cost; workerModels?: string[]; requireHetero?: boolean } = {},
+  opts: { budgetMax?: number; cost?: Cost; workerModels?: string[]; requireHetero?: boolean; normalizeModels?: boolean } = {},
 ): Task[] {
   const t = loadTask(id);
   if (t.status !== "claimed" && t.status !== "done" && t.status !== "failed") {
@@ -379,7 +446,11 @@ export function splitOnce(
       throw new HomogeneousAssignment(id, models.map((m) => m ?? "(unassigned)"));
     }
     if (opts.requireHetero ?? true) {
-      const distinct = distinctWorkerModels(models);
+      // R5-B: normalizeModels=true counts hetero under normModel (compare-only;
+      // raw ids stay on child records + ledger). Default strict (R5-A intact).
+      const distinct = (opts.normalizeModels ?? false)
+        ? distinctWorkerModelsNorm(models)
+        : distinctWorkerModels(models);
       if (distinct.length < 2) {
         throw new HomogeneousAssignment(id, models as string[]);
       }
@@ -488,12 +559,14 @@ if (cmd === "enqueue") {
   }
   console.log(`reported ${id}`);
 } else if (cmd === "verify") {
-  // verify <id> <pass|fail> <reviewerModel> <workerModel> <reason...>
+  // verify <id> <pass|fail> <reviewerModel> <workerModel> [--norm] <reason...>
+  // R5-B: --norm opts into normalized model compare (sameModel); default strict.
   const [id, verdict, reviewerModel, workerModel, ...rest] = args;
-  const reason = rest.join(" ");
+  const norm = rest[0] === "--norm";
+  const reason = (norm ? rest.slice(1) : rest).join(" ");
   if (!id || (verdict !== "pass" && verdict !== "fail") || !reviewerModel || !workerModel || !reason) usage();
-  verify(id, verdict, { reviewerModel, workerModel, reason });
-  console.log(`verified ${id}: ${verdict}`);
+  verify(id, verdict, { reviewerModel, workerModel, reason, ...(norm ? { normalizeModels: true as const } : {}) });
+  console.log(`verified ${id}: ${verdict}${norm ? " (norm)" : ""}`);
 } else if (cmd === "atomic") {
   // atomic <criterion...>: loop-side atomicity check (heuristic v1).
   const criterion = args.join(" ");
@@ -507,17 +580,21 @@ if (cmd === "enqueue") {
   console.log(isAtomicV2(criterion) ? "atomic" : "split");
   console.log(`[scope files=${s.files} tools=${s.tools} roles=${s.roles}]`);
 } else if (cmd === "split") {
-  // split <id> <model> [--budget N] [--models m1,m2,...] <role[@workerModel]:criterion> [...]
+  // split <id> <model> [--budget N] [--norm] [--models m1,m2,...] <role[@workerModel]:criterion> [...]
   // R2-B: per-child worker model via role@model: prefix or --models list (additive).
+  // R5-B: --norm counts hetero under normModel (compare-only; raw ids stored).
   const [id, model, ...rest] = args;
   if (!id || !model || rest.length === 0) usage();
   let budgetMax: number | undefined;
   let cliModels: string[] | undefined;
+  let norm = false;
   const specs: string[] = [];
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === "--budget") {
       budgetMax = Number(rest[++i]);
       if (!Number.isFinite(budgetMax)) usage();
+    } else if (rest[i] === "--norm") {
+      norm = true;
     } else if (rest[i] === "--models") {
       const raw = rest[++i] ?? "";
       cliModels = raw.split(",").map((m) => m.trim()).filter(Boolean);
@@ -539,7 +616,10 @@ if (cmd === "enqueue") {
     return workerModel ? { role, criterion, workerModel } : { role, criterion };
   });
   try {
-    const made = splitOnce(id, children, model, budgetMax === undefined ? {} : { budgetMax });
+    const made = splitOnce(id, children, model, {
+      ...(budgetMax === undefined ? {} : { budgetMax }),
+      ...(norm ? { normalizeModels: true as const } : {}),
+    });
     console.log(`split ${id} -> ${made.map((c) => c.id).join(",")}`);
     for (const c of made) console.log(`  ${c.id} workerModel=${c.workerModel ?? "(none)"}`);
   } catch (e) {
