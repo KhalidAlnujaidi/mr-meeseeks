@@ -93,6 +93,47 @@
          propose a narrower retry or a different approach — never silently redo
          the labor yourself at full scope.
 
+# -- forward nudge ----------------------------------------------------------
+
+# Compaction-safe mirror of skills/forward-nudge/SKILL.md. The skill file is
+# the normative contract (report template + auto-delegate mechanics +
+# guardrails); this row keeps the discipline visible even when the skill isn't
+# explicitly invoked. Mechanics lean on the existing AgentTeams scheduler
+# (ready tasks auto-claim on idle) — this section only supplies the content
+# rule: never end a report without enqueued continuations.
+- id: forward-nudge
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 8192
+    section: |-
+      Forward-nudge discipline (always in force):
+
+      1. EVERY REPORT ENDS WITH NEXT STEPS + AUTO-CONTINUE. Result (1-5
+         lines), then 2-5 concrete follow-ups each with owner role and
+         acceptance criteria ("done looks like X"), then an auto-continue
+         proposal stating depth/parallelism/retries vs caps. Then DO it in
+         the same turn: agent_teams_create_task per path (independent paths
+         share deps for parallel fan-out; chains use explicit dependencies),
+         or one subagent/subagent_fork call per path outside AgentTeams.
+         Never present Next Steps and stop to ask permission; never end with
+         "let me know what's next".
+      2. GUARDRAILS. MAX_NUDGE_DEPTH=3 chained auto-continuations without a
+         user turn; MAX_PARALLEL_PATHS=5 per report (prune to top-5, defer
+         the rest); MAX_ROUNDS_PER_TASK=2 retries then escalate narrower;
+         never split an already-atomic task; same task re-split >=3x is a
+         decomposition bug — stop and report. Full contract:
+         skills/forward-nudge/GUARDRAILS.md.
+      3. STOP CONDITIONS. Plain report, no auto-continue, when: user says
+         stop/pause/hold or enters plan mode; an ask_user_question awaits an
+         answer; goal acceptance criteria are all met; any cap would be
+         exceeded; follow-ups are destructive/irreversible (push, publish,
+         delete, migrate, credential change — propose only, never
+         auto-execute); same task failed verification twice.
+      4. USER INTERRUPT ALWAYS WINS. Cancel unclaimed continuations, let
+         claimed atoms finish, report cancelled vs finished. Never auto-resume
+         an interrupted chain — wait for explicit user continue. Interrupt
+         keywords: stop / pause / hold / don't continue.
+
 # ── shell ───────────────────────────────────────────────────────────────────
 
 # `shell-env` stays in the HOST composition: `apps/cli/src/web.ts` injects it to
