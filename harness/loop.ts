@@ -22,6 +22,118 @@ import { openSync, closeSync, mkdirSync, readdirSync, readFileSync, writeFileSyn
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// --- t-proxy (optional daemon-backed path, additive-only) ---
+// harnessd-proxy.ts lives in cpp-harness/ts/ (the daemon sidecar client).
+// loop.ts resolves it relative to HERE so `node harness/loop.ts` keeps
+// working with zero new deps and zero config when the daemon is absent.
+// Erasable-syntax constraint: no `Channel<T>`-style generic type args —
+// plain dynamic import + structural calls only (Node >=22.18 strips types).
+const DAEMON_PROXY_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "cpp-harness", "ts", "harnessd-proxy.ts");
+
+/** Daemon configured iff BOTH socket path and token are present. */
+export function daemonConfigured(env: Record<string, string | undefined> = process.env): boolean {
+  return !!(env["HARNESSD_SOCK"] && env["HARNESSD_TOKEN"]);
+}
+
+type DaemonOps = {
+  checkSplit: (p: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  busPost: (p: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  sandboxExec: (p: Record<string, unknown>) => Promise<Record<string, unknown>>;
+};
+
+let daemonOpsCache: DaemonOps | null = null;
+let daemonOpsFailed = false;
+
+/**
+ * Lazy daemon ops loader. Returns null when the daemon is not configured
+ * or the proxy module cannot load — callers always fall back to local
+ * behavior and never hard-fail the loop on daemon absence.
+ */
+export async function loadDaemonOps(): Promise<DaemonOps | null> {
+  if (!daemonConfigured()) return null;
+  if (daemonOpsCache) return daemonOpsCache;
+  if (daemonOpsFailed) return null;
+  try {
+    const mod = await import(DAEMON_PROXY_PATH) as { daemonOps: DaemonOps };
+    daemonOpsCache = mod.daemonOps;
+    return daemonOpsCache;
+  } catch {
+    daemonOpsFailed = true; // socket-unavailable / import failure: local fallback
+    return null;
+  }
+}
+
+/** Test hook: reset the cached daemon ops (forces re-import on next call). */
+export function resetDaemonOpsCache(): void {
+  daemonOpsCache = null;
+  daemonOpsFailed = false;
+}
+
+/**
+ * consultDaemonSplit(): optional pre-call verdict from harnessd.
+ * Returns "allow" | "deny:<code>" | null (null = daemon absent/unreachable:
+ * caller falls back to the local Math.pow guard). Never throws for
+ * transport reasons; daemon verdict wins ONLY on explicit deny.
+ */
+export async function consultDaemonSplit(args: {
+  task_id: string; parent_depth: number; breadth: number; resplit_count: number;
+  models?: string[];
+}): Promise<string | null> {
+  const ops = await loadDaemonOps();
+  if (!ops) return null;
+  try {
+    const res = await ops.checkSplit({
+      task_id: args.task_id,
+      parent_depth: args.parent_depth,
+      breadth: args.breadth,
+      resplit_count: args.resplit_count,
+      parent_atomic: 0,
+      parent_split: 0,
+      models_raw: (args.models ?? []).map((m) => `"${m.replace(/"/g, "")}"`).join(","),
+      tree_used: 0,
+      day_used: 0,
+    });
+    const result = res["result"] as Record<string, unknown> | undefined;
+    const verdict = result?.["verdict"];
+    if (verdict === "deny") return `deny:${String(result?.["code"] ?? "Unknown")}`;
+    return "allow";
+  } catch {
+    return null; // socket-unavailable mid-call: local fallback, never hard-fail
+  }
+}
+
+/**
+ * postDaemonBus(): best-effort bus_post mirror of a report. Swallows ALL
+ * errors — the JSONL ledger stays the source of truth. Returns true iff
+ * the daemon acknowledged.
+ */
+export async function postDaemonBus(entry: Record<string, unknown>): Promise<boolean> {
+  const ops = await loadDaemonOps();
+  if (!ops) return false;
+  try {
+    await ops.busPost(entry);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * sandboxExec(): helper for future driver use (NOT wired into the sync
+ * loop path — drivers call it explicitly). Returns the daemon result, or
+ * null when the daemon is absent/unreachable. Never throws for transport
+ * reasons.
+ */
+export async function sandboxExec(req: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  const ops = await loadDaemonOps();
+  if (!ops) return null;
+  try {
+    return await ops.sandboxExec(req);
+  } catch {
+    return null;
+  }
+}
+
 export type TaskStatus = "queued" | "claimed" | "done" | "verified" | "failed";
 export type Role = "researcher" | "engineer" | "reviewer";
 
@@ -217,6 +329,8 @@ const ZERO_COST: Cost = { input_tokens: 0, output_tokens: 0 };
 /**
  * report(): claimed -> done. Writes result, appends one report ledger line
  * (verdict=null; the verifier decides). Rejects oversized results.
+ * t-proxy: best-effort daemon bus_post mirror, fire-and-forget — the JSONL
+ * ledger stays the source of truth; daemon errors never fail the report.
  */
 export function report(id: string, result: string, model: string, cost: Cost = ZERO_COST): Task {
   const t = loadTask(id);
@@ -229,6 +343,12 @@ export function report(id: string, result: string, model: string, cost: Cost = Z
     type: "report", task_id: t.id, parent_id: t.parent_id, depth: t.depth,
     model, role: t.role, ts: new Date().toISOString(), cost,
     criterion: t.criterion, verdict: null, detail: result, resplit_count: t.resplit_count,
+  });
+  // Best-effort daemon mirror: postDaemonBus never throws (swallows all
+  // transport errors internally); floating promise is safe by construction.
+  postDaemonBus({
+    taskId: t.id, parentSessionId: t.parent_id ?? "", namespace: "harness",
+    key: `report:${t.id}`, value: result.slice(0, 1024), updatedBy: model,
   });
   return t;
 }
@@ -580,6 +700,11 @@ export function distinctWorkerModelsNorm(models: (string | undefined)[]): string
  * ledger line, and enqueues children (re-queue = depth emerges from queueing).
  * Guards: spiral (resplit_count==3 → report SPIRAL, stop lineage) then budget
  * (breadth^depth estimate vs run budget before each split).
+ * t-proxy: splitOnceAsync() is the daemon-backed twin — when HARNESSD_SOCK/
+ * HARNESSD_TOKEN are set it consults daemonOps.checkSplit pre-call and a
+ * daemon deny wins (throws BudgetExceeded); on socket-unavailable it falls
+ * back to the local Math.pow guard below. The sync splitOnce() is UNTOUCHED
+ * (local guard only) so existing tests/CLI behave identically.
  */
 export function splitOnce(
   id: string, children: ChildSpec[], model: string,
@@ -657,6 +782,37 @@ export function splitOnce(
   return made;
 }
 
+/**
+ * splitOnceAsync(): daemon-backed twin of splitOnce(). Identical guards and
+ * identical writes; the ONLY delta is an optional daemon consult inserted
+ * AFTER the spiral guard and BEFORE the local budget guard:
+ *   - daemon unconfigured/unreachable (consultDaemonSplit → null): local
+ *     Math.pow guard applies exactly as in splitOnce();
+ *   - daemon allows: local Math.pow guard still applies (daemon is advisory);
+ *   - daemon denies ("deny:<code>"): the daemon verdict wins — throws
+ *     BudgetExceeded so callers handle one error type for both paths.
+ * Never hard-fails the loop on daemon transport errors.
+ */
+export async function splitOnceAsync(
+  id: string, children: ChildSpec[], model: string,
+  opts: { budgetMax?: number; cost?: Cost; workerModels?: string[]; requireHetero?: boolean; normalizeModels?: boolean } = {},
+): Promise<Task[]> {
+  const peek = loadTask(id);
+  if (peek.status === "claimed" || peek.status === "done" || peek.status === "failed") {
+    const tModels = opts.workerModels ?? children.map((c) => c.workerModel);
+    const verdict = await consultDaemonSplit({
+      task_id: id, parent_depth: peek.depth, breadth: children.length,
+      resplit_count: peek.resplit_count, models: tModels.filter((m): m is string => !!m),
+    });
+    if (verdict !== null && verdict !== "allow") {
+      const max = opts.budgetMax ?? DEFAULT_BUDGET_MAX_AGENTS;
+      const estimate = Math.pow(children.length, peek.depth + 1);
+      throw new BudgetExceeded(id, estimate, max);
+    }
+  }
+  return splitOnce(id, children, model, opts);
+}
+
 // --- t8 smoke test drives enqueue→claim→do→report→verify→split→requeue ---
 
 function usage(): never {
@@ -665,6 +821,10 @@ function usage(): never {
 }
 
 // Minimal CLI for smoke tests (t8 drives this end-to-end).
+// t-proxy: guarded so `import "./harness/loop.ts"` (daemon smoke tests,
+// future drivers) does NOT execute the CLI dispatch — only a direct
+// `node harness/loop.ts <cmd>` run enters it (argv[1] ends with loop.ts).
+if (process.argv[1] !== undefined && process.argv[1].endsWith("loop.ts")) {
 const [, , cmd, ...args] = process.argv;
 if (cmd === "enqueue") {
   const [id, role, criterion] = args;
@@ -817,3 +977,4 @@ if (cmd === "enqueue") {
 } else {
   usage();
 }
+} // end direct-run CLI guard (import-safe: importing loop.ts runs no CLI)
