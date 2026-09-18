@@ -71,6 +71,8 @@ else
 fi
 
 # macOS ships bash 3.2: no mapfile, and RANDOM is fine.
+# pick_random — echo one random pool index in [0, ${#POOL[@]}).
+# Honors KILO_SUBAGENT_SEED for reproducible ordering when set.
 pick_random() {
   local n=${#POOL[@]}
   if [ -n "${KILO_SUBAGENT_SEED:-}" ]; then

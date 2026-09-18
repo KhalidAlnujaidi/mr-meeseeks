@@ -3,3 +3,6 @@ plugin/lib/
 *.tsbuildinfo
 .DS_Store
 .agent-teams/
+harness/tasks/
+harness/queue/
+*.lock

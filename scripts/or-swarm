@@ -66,6 +66,11 @@ KILO_POOL = [m["id"] for m in FREE_MODELS if m["verified"] and not m["id"].start
 
 
 def call_openrouter(model: str, prompt: str, max_tokens: int, timeout: int) -> dict:
+    """Direct lane: one chat completion via the OpenRouter HTTP API.
+
+    Returns a result dict with ok/text/seconds plus cost data when the
+    call succeeds, or ok=False with an error string on any failure.
+    """
     key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not key:
         return {"model": model, "ok": False, "error": "OPENROUTER_API_KEY not set"}
@@ -134,6 +139,7 @@ def call_kilo(model: str, prompt: str, timeout: int) -> dict:
 
 
 def main() -> int:
+    """CLI entry point: parse args, fan out parallel calls, print results."""
     ap = argparse.ArgumentParser(description="Parallel swarm over OpenRouter free models.")
     ap.add_argument("task", help="the task/prompt to fan out")
     ap.add_argument("-n", "--agents", type=int, default=1, help="number of parallel calls (default 1)")
