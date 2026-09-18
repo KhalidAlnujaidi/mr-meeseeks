@@ -6,3 +6,6 @@ plugin/lib/
 harness/tasks/
 harness/queue/
 *.lock
+# C++ build outputs
+cpp-harness/build/
+cpp-harness/build-native/
