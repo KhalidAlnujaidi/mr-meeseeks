@@ -102,7 +102,8 @@ while [ "$attempt" -lt "$MAX_ATTEMPTS" ] && [ "${#ORDER[@]}" -gt 0 ]; do
   m="${POOL[${ORDER[$idx]}]}"
   unset 'ORDER[$idx]'
   # Re-densify the array (bash 3.2 has no sparse-array compaction).
-  ORDER=("${ORDER[@]}")
+  # Guard: expanding an empty array under `set -u` errors on old bash.
+  if [ "${#ORDER[@]}" -gt 0 ]; then ORDER=("${ORDER[@]}"); fi
 
   attempt=$((attempt+1))
   echo "[kilo-subagent] attempt $attempt/$MAX_ATTEMPTS -> $m (timeout ${TIMEOUT}s)" >&2
