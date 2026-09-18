@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""or-free-swarm — spawn a parallel swarm of OpenRouter FREE models.
+"""or-swarm — spawn a parallel swarm of OpenRouter FREE models.
 
 Lane 1: direct OpenRouter API calls (no CLI overhead, true parallelism).
 Lane 2 (--via-kilo): delegate through `kilo run` free tier for agentic tasks.
@@ -9,9 +9,12 @@ not merely listed as $0 in the catalog. See FREE_MODELS below for provenance.
 
 Usage:
   or-swarm "Summarize this" -i file.md
-  or-swarm "Explain X" -n 8 --models stealth/union-alpha
+  or-swarm "Explain X" -n 8 --models <id-from---list>
   or-swarm "task" -n 6 --mix            # rotate across all verified models
   or-swarm "task" --via-kilo            # agentic lane through kilo
+
+Flags (see --help for full list): -n/--agents, -m/--models, -i/--input-file,
+  --mix, --via-kilo, --max-tokens, --timeout, --json, --list.
 
 Env:
   OPENROUTER_API_KEY   required for lane 1 (read from env, not hardcoded)

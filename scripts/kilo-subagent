@@ -9,6 +9,7 @@
 #   kilo-subagent "task description"
 #   kilo-subagent -f context.py "Add docstrings to every function"
 #   kilo-subagent -n 3 "task"          # try up to 3 different models
+#   kilo-subagent -r "task"            # readonly: no file writes, text answer
 #   echo "code" | kilo-subagent "task"
 #
 # Env:
