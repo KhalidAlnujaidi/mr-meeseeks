@@ -6,7 +6,11 @@
 //   server -> client:        {"ok": true, ...} | {"ok": false, "error": "..."}
 //
 // Ops: check_split | report | bus_post | sandbox_exec |
-//      worktree_acquire | worktree_release | backend_label | ping
+//      worktree_acquire | worktree_release | backend_label | ping |
+//      jev_status | jev_route
+// Jev note: the daemon holds NO TypeSafe key. jev_status reports routing
+// availability/policy; jev_route enforces the hard B^D budget check BEFORE
+// any Jev/LLM dispatch (deny => caller must not dispatch remotely).
 // Token source: HARNESSD_TOKEN env (required). Socket path: argv[1] or
 // $HARNESSD_SOCK or /tmp/harnessd.sock. Config: argv[2] JSON or
 // $HARNESSD_CONFIG_JSON. Single-threaded accept loop, per-conn line budget
@@ -125,6 +129,20 @@ std::string dispatch(harness_host_t* host, const std::string& line) {
         (int)jnum(line, "parent_atomic"), (int)jnum(line, "parent_split"),
         models.c_str(), jnum(line, "tree_used"), jnum(line, "day_used"), buf,
         sizeof(buf), &trunc);
+    if (rc == 0) {
+      payload.assign(buf);
+      return "{\"ok\":true,\"result\":" + payload + "}";
+    }
+  } else if (op == "jev_status") {
+    rc = harness_jev_status(buf, sizeof(buf), &trunc);
+    if (rc == 0) {
+      payload.assign(buf);
+      return "{\"ok\":true,\"result\":" + payload + "}";
+    }
+  } else if (op == "jev_route") {
+    rc = harness_jev_route(host, (int)jnum(line, "parent_depth"),
+                           (int)jnum(line, "breadth", 1), jnum(line, "tree_used"),
+                           jnum(line, "day_used"), buf, sizeof(buf), &trunc);
     if (rc == 0) {
       payload.assign(buf);
       return "{\"ok\":true,\"result\":" + payload + "}";

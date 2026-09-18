@@ -106,4 +106,10 @@ export const daemonOps = {
     daemonCall({ op: "worktree_acquire", ...p }, o),
   worktreeRelease: (p: Record<string, unknown>, o?: DaemonCallOpts) =>
     daemonCall({ op: "worktree_release", ...p }, o),
+  // Jev routing: daemon holds no TypeSafe key. jevStatus reports
+  // availability/policy; jevRoute enforces the hard B^D budget check
+  // BEFORE any Jev/LLM dispatch (deny => fall back locally, no remote call).
+  jevStatus: (o?: DaemonCallOpts) => daemonCall({ op: "jev_status" }, o),
+  jevRoute: (p: Record<string, unknown>, o?: DaemonCallOpts) =>
+    daemonCall({ op: "jev_route", ...p }, o),
 };

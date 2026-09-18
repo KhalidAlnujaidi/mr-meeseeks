@@ -9,3 +9,6 @@ harness/queue/
 # C++ build outputs
 cpp-harness/build/
 cpp-harness/build-native/
+cpp-harness/Testing/
+# Local benchmark outputs
+stats-*.html

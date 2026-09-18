@@ -75,6 +75,28 @@ int harness_worktree_release(harness_host_t* host, const char* team,
 // else "shell-git", plus "+linux-namespaces" / "+sandbox-exec" / "+unisolated".
 int harness_backend_label(char* out, size_t out_len, int* out_truncated);
 
+// Jev decision routing (TypeSafe AI System One) — availability + budget gate.
+//
+// SECURITY: the daemon NEVER stores, reads, or forwards TYPESAFE_API_KEY.
+// Jev inference runs in the TS sidecar (harness/jev.ts, direct fetch); the
+// daemon only (a) reports routing availability/policy via harness_jev_status,
+// and (b) enforces the hard B^D token budget check via harness_jev_route
+// BEFORE any Jev/LLM dispatch is allowed. A deny from the budget gate means
+// the caller MUST NOT dispatch to Jev/LLM for that fan-out (graceful
+// fallback: stay with the local v2c hybrid, no remote call).
+//
+// harness_jev_status out:
+//   {"available":true,"mode":"ts-sidecar-only","keyInDaemon":false,
+//    "budgetGate":"B^D pre-dispatch","policy":"deny-means-no-dispatch"}
+// harness_jev_route out:
+//   {"verdict":"allow|warn|deny","code":"Ok|...","estimate":N,
+//    "dispatchAllowed":true|false,"message":"..."} — dispatchAllowed is false
+//   exactly when verdict is deny (budget gate tripped first).
+int harness_jev_status(char* out, size_t out_len, int* out_truncated);
+int harness_jev_route(harness_host_t* host, int parent_depth, int breadth,
+                      long tree_used, long day_used, char* out, size_t out_len,
+                      int* out_truncated);
+
 #ifdef __cplusplus
 }
 #endif

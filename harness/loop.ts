@@ -21,6 +21,8 @@
 import { openSync, closeSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { judge, routeJudge } from "./typesafe-judge.ts";
+import { batchPrune, checkAtomicityNoul, chooseTopology, verifyGate, JEV_ATOMIC_BUDGET_MS } from "./jev.ts";
 
 // --- t-proxy (optional daemon-backed path, additive-only) ---
 // harnessd-proxy.ts lives in cpp-harness/ts/ (the daemon sidecar client).
@@ -165,6 +167,10 @@ export interface LedgerLine {
   verdict: "pass" | "fail" | null;
   detail: string;
   resplit_count: number;
+  // t3 (R8-safe additive): optional Jev confidence on verify lines.
+  // Readers must tolerate its absence — old lines never carry it and
+  // verify() only sets it when a real (non-fallback) Jev verdict exists.
+  jev_confidence?: number;
 }
 
 const HERE = join(dirname(fileURLToPath(import.meta.url)));
@@ -415,7 +421,7 @@ export function errHint(assigned: string, got: string): string {
  */
 export function verify(
   id: string, verdict: "pass" | "fail",
-  opts: { reviewerModel: string; workerModel: string; reason: string; cost?: Cost; normalizeModels?: boolean },
+  opts: { reviewerModel: string; workerModel: string; reason: string; cost?: Cost; normalizeModels?: boolean; jevConfidence?: number },
 ): Task {
   const t = loadTask(id);
   if (t.status !== "done") throw new Error(`task ${id} must be reported before verify (status=${t.status})`);
@@ -439,6 +445,9 @@ export function verify(
     model: opts.reviewerModel, role: "reviewer", ts: new Date().toISOString(),
     cost: opts.cost ?? ZERO_COST, criterion: t.criterion, verdict,
     detail: opts.reason, resplit_count: t.resplit_count,
+    // t3: optional Jev confidence — set only for real (non-fallback)
+    // verdicts; absent on all old lines (R8 format unchanged otherwise).
+    ...(typeof opts.jevConfidence === "number" ? { jev_confidence: opts.jevConfidence } : {}),
   });
   return t;
 }
@@ -671,6 +680,61 @@ export function isAtomicV2C(criterion: string): boolean {
   return s.files <= 1 && s.tools <= 1 && s.roles <= 1;
 }
 
+/**
+ * t3: Jev-first atomicity with v2c fallback (claim-time path).
+ * Tries checkAtomicityNoul with the <150ms budget; on fallback (no key,
+ * timeout, transport error, malformed answer) degrades to isAtomicV2C
+ * and flags itself so callers know the verdict is local, not calibrated.
+ * Never throws for transport reasons; throws only on empty criterion
+ * (caller misuse, same as checkAtomicityNoul).
+ */
+export interface AtomicAsyncResult { atomic: boolean; source: "jev" | "v2c"; jevConfidence?: number; latencyMs: number; }
+export async function isAtomicAsync(criterion: string): Promise<AtomicAsyncResult> {
+  const r = await checkAtomicityNoul(criterion, { timeoutMs: JEV_ATOMIC_BUDGET_MS });
+  if (!r.fallback) {
+    return { atomic: r.atomic, source: "jev", jevConfidence: r.confidence, latencyMs: r.latencyMs };
+  }
+  return { atomic: isAtomicV2C(criterion), source: "v2c", latencyMs: r.latencyMs };
+}
+
+/**
+ * t3: Jev verify-gate helper. Runs verifyGate(output, criterion) and maps
+ * the result onto a verify() call: pass iff p >= 0.85; on fallback or
+ * p < 0.5 the reason routes to human review (escalate). Real (non-fallback)
+ * confidence is recorded on the ledger line via opts.jevConfidence.
+ */
+export async function jevVerify(
+  id: string,
+  output: string,
+  opts: { reviewerModel: string; workerModel: string; cost?: Cost; normalizeModels?: boolean },
+): Promise<Task> {
+  const t = loadTask(id);
+  const g = await verifyGate(output, t.criterion);
+  if (g.fallback || g.escalate) {
+    const why = g.fallback ? "jev unavailable, human review" : `jev confidence ${g.confidence.toFixed(3)} below 0.5, human review`;
+    return verify(id, "fail", { ...opts, reason: `VERIFY-ESCALATE: ${why}` });
+  }
+  const verdict = g.pass ? "pass" as const : "fail" as const;
+  const reason = g.pass
+    ? `jev gate pass (p=${g.confidence.toFixed(3)} >= 0.85)`
+    : `jev gate low confidence (p=${g.confidence.toFixed(3)} < 0.85), human review`;
+  return verify(id, verdict, { ...opts, reason, jevConfidence: g.confidence });
+}
+
+/**
+ * t3: forward-nudge batch prune helper. Thin wrapper over batchPrune
+ * with the loop-local naming (queue of pending nudges + run context).
+ * Fail-open: fallback keeps everything (prune nothing without signal).
+ */
+export async function pruneNudges(
+  context: string,
+  nudges: { id: string; text: string }[],
+  opts: { threshold?: number } = {},
+): Promise<{ keep: string[]; drop: { id: string; p: number }[] }> {
+  const r = await batchPrune(context, nudges, opts);
+  return { keep: r.keep, drop: r.drop };
+}
+
 export interface ChildSpec { role: Role; criterion: string; workerModel?: string; }
 
 export class HomogeneousAssignment extends Error {
@@ -816,7 +880,7 @@ export async function splitOnceAsync(
 // --- t8 smoke test drives enqueue→claim→do→report→verify→split→requeue ---
 
 function usage(): never {
-  console.error("usage: node harness/loop.ts <enqueue|claim|poll|show|prompt|report|verify|split|atomic|atomic2|atomic2a|atomic2b|atomic2c> [args...]");
+  console.error("usage: node harness/loop.ts <enqueue|claim|poll|show|prompt|report|verify|split|atomic|judge|atomic2|atomic2a|atomic2b|atomic2c|jev-check|jev-topology|jev-verify|jev-prune> [args...]");
   process.exit(1);
 }
 
@@ -888,6 +952,20 @@ if (cmd === "enqueue") {
   const criterion = args.join(" ");
   if (!criterion) usage();
   console.log(isAtomic(criterion) ? "atomic" : "split");
+} else if (cmd === "judge") {
+  // judge <criterion...>: calibrated Jev verdict (typesafe-judge.ts).
+  // Prints route + confidence + atomicity + spiral + routing action.
+  // Key from TYPESAFE_API_KEY env only; missing key/API error → fallback
+  // (do_direct, conf 0, escalate). Never logs the key.
+  const criterion = args.join(" ");
+  if (!criterion) usage();
+  const v = await judge(criterion, criterion);
+  const r = routeJudge(v);
+  const action = r.action === "act" ? `act:${r.route}`
+    : r.action === "escalate" ? `escalate:${JSON.stringify(r.probabilities)}`
+    : r.action;
+  console.log(`route=${v.route} conf=${v.confidence.toFixed(3)} atomicity=${v.atomicity_score} spiral=${v.spiral.toFixed(3)}${v.fallback ? " fallback" : ""} usage_in=${v.usage?.input_tokens ?? 0} usage_out=${v.usage?.output_tokens ?? 0}`);
+  console.log(`action=${action}`);
 } else if (cmd === "atomic2") {
   // atomic2 <criterion...>: scope-aware atomicity check (heuristic v2, additive).
   const criterion = args.join(" ");
@@ -916,6 +994,46 @@ if (cmd === "enqueue") {
   const s = scopeCountsC(criterion);
   console.log(isAtomicV2C(criterion) ? "atomic" : "split");
   console.log(`[scopeC files=${s.files} tools=${s.tools} roles=${s.roles}]`);
+} else if (cmd === "jev-check") {
+  // jev-check <criterion...>: Jev-first atomicity (t3 isAtomicAsync).
+  // Tries checkAtomicityNoul (<150ms), falls back to isAtomicV2C.
+  // Key from TYPESAFE_API_KEY env only; no key → v2c fallback. Never logs the key.
+  const criterion = args.join(" ");
+  if (!criterion) usage();
+  const r = await isAtomicAsync(criterion);
+  console.log(`${r.atomic ? "atomic" : "split"} source=${r.source}${r.jevConfidence !== undefined ? ` jev_conf=${r.jevConfidence.toFixed(3)}` : ""} latency_ms=${r.latencyMs}`);
+} else if (cmd === "jev-topology") {
+  // jev-topology <task...>: single Choice → RESEARCHER_ONLY|ENGINEER_REVIEWER|FULL_SWARM.
+  // Strict enum validation; fallback → ENGINEER_REVIEWER + "fallback".
+  const task = args.join(" ");
+  if (!task) usage();
+  const r = await chooseTopology(task);
+  console.log(`topology=${r.topology} conf=${r.confidence.toFixed(3)}${r.fallback ? " fallback" : ""} latency_ms=${r.latencyMs}`);
+  if (!r.fallback) console.log(`probs=${JSON.stringify(r.probabilities)}`);
+} else if (cmd === "jev-verify") {
+  // jev-verify <id> <reviewerModel> <workerModel> [--norm] <output...>
+  // Jev gate (0.85 pass / 0.5 escalate) mapped onto verify(); real Jev
+  // confidence lands on the ledger line as jev_confidence (R8-safe).
+  const [id, reviewerModel, workerModel, ...rest] = args;
+  const norm = rest[0] === "--norm";
+  const output = (norm ? rest.slice(1) : rest).join(" ");
+  if (!id || !reviewerModel || !workerModel || !output) usage();
+  const t = await jevVerify(id, output, {
+    reviewerModel, workerModel, ...(norm ? { normalizeModels: true as const } : {}),
+  });
+  console.log(`verified ${t.id}: ${t.status}`);
+} else if (cmd === "jev-prune") {
+  // jev-prune <context> <id:text> [...]: one batched Noul call over pending
+  // nudges (forward-nudge helper). Fail-open: no signal → keep all.
+  const [context, ...specs] = args;
+  if (!context || specs.length === 0) usage();
+  const nudges = specs.map((s) => {
+    const j = s.indexOf(":");
+    if (j < 0) usage();
+    return { id: s.slice(0, j), text: s.slice(j + 1) };
+  });
+  const r = await pruneNudges(context, nudges);
+  console.log(`keep=[${r.keep.join(",")}] drop=[${r.drop.map((d) => `${d.id}:${d.p.toFixed(3)}`).join(",")}]`);
 } else if (cmd === "split") {
   // split <id> <model> [--budget N] [--norm] [--models m1,m2,...] <role[@workerModel]:criterion> [...]
   // R2-B: per-child worker model via role@model: prefix or --models list (additive).

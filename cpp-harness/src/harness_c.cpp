@@ -349,8 +349,7 @@ int harness_worktree_release(harness_host_t* host, const char* team,
   }
 }
 
-int harness_backend_label(char* out, size_t out_len, int* out_truncated) {
-  try {
+int harness_backend_label(char* out, size_t out_len, int* out_truncated) {  try {
     std::string git =
 #ifdef HARNESS_USE_LIBGIT2
         "libgit2-native";
@@ -366,6 +365,50 @@ int harness_backend_label(char* out, size_t out_len, int* out_truncated) {
         "+unisolated";
 #endif
     return emit(out, out_len, out_truncated, git + sb);
+  } catch (...) {
+    return HARNESS_C_ERR;
+  }
+}
+
+// Jev routing: daemon holds NO API key. harness_jev_status is a static
+// policy report; harness_jev_route reuses the TokenFirewall B^D budget
+// gate (checkSplit, non-atomic, resplit 0, hetero pair) BEFORE any
+// Jev/LLM dispatch. Deny => dispatchAllowed=false => caller must fall
+// back locally without a remote call.
+int harness_jev_status(char* out, size_t out_len, int* out_truncated) {
+  try {
+    return emit(out, out_len, out_truncated,
+                "{\"available\":true,\"mode\":\"ts-sidecar-only\","
+                "\"keyInDaemon\":false,\"budgetGate\":\"B^D pre-dispatch\","
+                "\"policy\":\"deny-means-no-dispatch\"}");
+  } catch (...) {
+    return HARNESS_C_ERR;
+  }
+}
+
+int harness_jev_route(harness_host_t* host, int parent_depth, int breadth,
+                      long tree_used, long day_used, char* out, size_t out_len,
+                      int* out_truncated) {
+  if (!host) return HARNESS_C_ERR;
+  if (breadth < 1) breadth = 1;
+  if (parent_depth < 0) parent_depth = 0;
+  try {
+    std::lock_guard<std::mutex> l(static_cast<Host*>(host)->mu);
+    Host* h = static_cast<Host*>(host);
+    // Hard budget check FIRST: same normative gate as check_split, with a
+    // hetero model pair so the assignment rule also applies. No Jev/LLM
+    // dispatch may happen when this gate denies.
+    auto d = h->fw->checkSplit("jev-route", parent_depth, breadth,
+                               /*resplitCount=*/0, /*parentAtomic=*/false,
+                               /*parentAlreadySplit=*/false,
+                               {"model-a", "model-b"}, tree_used, day_used);
+    bool allowed = (d.verdict != harness::GateVerdict::Deny);
+    std::string s = "{\"verdict\":\"" + verdictName(d.verdict) +
+                    "\",\"code\":\"" + codeName(d.code) + "\",\"estimate\":" +
+                    std::to_string(d.estimate) + ",\"dispatchAllowed\":" +
+                    (allowed ? "true" : "false") + ",\"message\":\"" +
+                    jesc(d.message) + "\"}";
+    return emit(out, out_len, out_truncated, s);
   } catch (...) {
     return HARNESS_C_ERR;
   }

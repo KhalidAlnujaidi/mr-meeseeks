@@ -24,6 +24,7 @@
 #include <iostream>
 
 #include "harness.hpp"
+#include "harness_c.h"
 
 #if defined(__linux__)
 #include <errno.h>
@@ -291,6 +292,46 @@ int main(int argc, char** argv) {
     ::shm_unlink(shmName.c_str());
   }
 #endif
+
+  // ---- 8. Jev routing: status + B^D pre-dispatch budget gate ---------------
+  // Daemon holds NO TypeSafe key: status reports ts-sidecar-only policy;
+  // jev_route reuses the TokenFirewall B^D gate BEFORE any Jev/LLM dispatch.
+  std::cout << "8. jev routing\n";
+  {
+    char sbuf[1024];
+    int strunc = 0;
+    check(harness_jev_status(sbuf, sizeof(sbuf), &strunc) == 0,
+          "jev_status reports availability");
+    std::string status(sbuf);
+    check(status.find("\"available\":true") != std::string::npos &&
+              status.find("\"keyInDaemon\":false") != std::string::npos &&
+              status.find("TYPESAFE") == std::string::npos,
+          "jev_status: ts-sidecar-only, no key in daemon");
+    char rbuf[2048];
+    int rtrunc = 0;
+    harness_host_t* jhost =
+        harness_host_create("{\"repoRoot\": \".\"}");
+    check(jhost != nullptr, "jev_route host create");
+    if (jhost) {
+      // Cheap fan-out: breadth 3 @ depth 0 -> allow, dispatch allowed.
+      check(harness_jev_route(jhost, 0, 3, 0, 0, rbuf, sizeof(rbuf),
+                              &rtrunc) == 0,
+            "jev_route cheap fan-out gates ok");
+      std::string cheap(rbuf);
+      check(cheap.find("\"dispatchAllowed\":true") != std::string::npos,
+            "jev_route cheap allows dispatch");
+      // Over-budget fan-out: breadth 5 @ depth 2 -> est 125 > 64: deny,
+      // dispatch NOT allowed (caller must fall back locally, no remote call).
+      check(harness_jev_route(jhost, 2, 5, 0, 0, rbuf, sizeof(rbuf),
+                              &rtrunc) == 0,
+            "jev_route over-budget fan-out gates ok");
+      std::string pricey(rbuf);
+      check(pricey.find("\"dispatchAllowed\":false") != std::string::npos &&
+                pricey.find("BudgetExceeded") != std::string::npos,
+            "jev_route over-budget denies dispatch (BUDGET_EXCEEDED)");
+      harness_host_destroy(jhost);
+    }
+  }
 
   std::cout << (failures == 0 ? "DEMO PASS\n" : "DEMO FAIL\n");
   return failures == 0 ? 0 : 1;
