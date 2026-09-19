@@ -21,9 +21,23 @@
 
 import { TYPESAFE_ENDPOINT, TYPESAFE_MODEL, resolveModel } from "./typesafe-judge.ts";
 
-/** Jev Noul budget for the claim-time atomicity path (loop tries Jev, else v2c). */
+/**
+ * Jev is NOT used on the claim-time atomicity path.
+ *
+ * Measured 2026-09-19 from the live endpoint: one Noul round-trip
+ * (our exact payload, criteria included) is ~935ms. The original 150ms
+ * budget could never be met, so every claim silently aborted mid-flight
+ * and reported source=v2c — the fallback_rate 1.00 seen in the A
+ * condition. A sub-100ms orchestration budget and a live model call are
+ * mutually exclusive, so atomicity stays local (isAtomicV2C, pure CPU)
+ * and Jev serves only the paths where a round-trip is affordable.
+ */
 export const JEV_ATOMIC_BUDGET_MS = 150;
-/** Default timeout for the non-critical paths (topology / verify / prune). */
+/**
+ * Timeout for the non-critical paths (topology / verify / prune).
+ * Must exceed the ~935ms observed round-trip with headroom for a slow
+ * day: 2000ms leaves >2x margin. Do not lower without re-measuring.
+ */
 export const JEV_DEFAULT_TIMEOUT_MS = 2000;
 /** verifyGate bands: pass >= 0.85, escalate < 0.5 (mirrors routeJudge bands). */
 export const VERIFY_PASS_THRESHOLD = 0.85;

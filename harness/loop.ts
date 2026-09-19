@@ -22,7 +22,7 @@ import { openSync, closeSync, mkdirSync, readdirSync, readFileSync, writeFileSyn
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { judge, routeJudge } from "./typesafe-judge.ts";
-import { batchPrune, checkAtomicityNoul, chooseTopology, verifyGate, JEV_ATOMIC_BUDGET_MS } from "./jev.ts";
+import { batchPrune, chooseTopology, verifyGate } from "./jev.ts";
 
 // --- t-proxy (optional daemon-backed path, additive-only) ---
 // harnessd-proxy.ts lives in cpp-harness/ts/ (the daemon sidecar client).
@@ -681,20 +681,25 @@ export function isAtomicV2C(criterion: string): boolean {
 }
 
 /**
- * t3: Jev-first atomicity with v2c fallback (claim-time path).
- * Tries checkAtomicityNoul with the <150ms budget; on fallback (no key,
- * timeout, transport error, malformed answer) degrades to isAtomicV2C
- * and flags itself so callers know the verdict is local, not calibrated.
- * Never throws for transport reasons; throws only on empty criterion
- * (caller misuse, same as checkAtomicityNoul).
+ * t3: claim-time atomicity. LOCAL ONLY — v2c (pure CPU, ~microseconds).
+ *
+ * Jev is deliberately NOT tried here. A live Noul round-trip measured
+ * ~935ms (2026-09-19), which cannot fit a sub-100ms orchestration
+ * budget; attempting it under a 150ms timeout meant every claim aborted
+ * mid-flight and reported source=v2c anyway. Paying ~1s to refine a
+ * single bit that isAtomicV2C already answers locally is a bad trade,
+ * so this path is honest about being local: source is always "v2c".
+ *
+ * Jev remains wired on the paths where a round-trip is affordable:
+ * chooseTopology / verifyGate / batchPrune (JEV_DEFAULT_TIMEOUT_MS).
+ * checkAtomicityNoul is still exported and still correct — it is simply
+ * not called from the hot path. Call it explicitly with a generous
+ * timeout (>=1500ms) if a calibrated atomicity verdict is ever wanted.
  */
 export interface AtomicAsyncResult { atomic: boolean; source: "jev" | "v2c"; jevConfidence?: number; latencyMs: number; }
 export async function isAtomicAsync(criterion: string): Promise<AtomicAsyncResult> {
-  const r = await checkAtomicityNoul(criterion, { timeoutMs: JEV_ATOMIC_BUDGET_MS });
-  if (!r.fallback) {
-    return { atomic: r.atomic, source: "jev", jevConfidence: r.confidence, latencyMs: r.latencyMs };
-  }
-  return { atomic: isAtomicV2C(criterion), source: "v2c", latencyMs: r.latencyMs };
+  const t0 = Date.now();
+  return { atomic: isAtomicV2C(criterion), source: "v2c", latencyMs: Date.now() - t0 };
 }
 
 /**
@@ -995,9 +1000,10 @@ if (cmd === "enqueue") {
   console.log(isAtomicV2C(criterion) ? "atomic" : "split");
   console.log(`[scopeC files=${s.files} tools=${s.tools} roles=${s.roles}]`);
 } else if (cmd === "jev-check") {
-  // jev-check <criterion...>: Jev-first atomicity (t3 isAtomicAsync).
-  // Tries checkAtomicityNoul (<150ms), falls back to isAtomicV2C.
-  // Key from TYPESAFE_API_KEY env only; no key → v2c fallback. Never logs the key.
+  // jev-check <criterion...>: LOCAL atomicity (isAtomicV2C), no network.
+  // Jev is not used here — a live Noul costs ~935ms, which cannot fit the
+  // sub-100ms claim budget (see isAtomicAsync). source is always v2c.
+  // Reports latency_ms so the local path's ~0ms cost stays visible.
   const criterion = args.join(" ");
   if (!criterion) usage();
   const r = await isAtomicAsync(criterion);
