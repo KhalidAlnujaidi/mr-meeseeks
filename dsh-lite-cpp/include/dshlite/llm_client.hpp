@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <future>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -56,11 +57,18 @@ class LlmClient : public ILlmPoster {
   /// Non-blocking POST; exceptions surface on future::get().
   std::future<LlmResponse> postAsync(const std::vector<Message>& messages);
 
-  TokenUsage totalUsage() const { return total_; }
-  long requestCount() const { return requests_; }
+  TokenUsage totalUsage() const {
+    std::lock_guard<std::mutex> l(mu_);
+    return total_;
+  }
+  long requestCount() const {
+    std::lock_guard<std::mutex> l(mu_);
+    return requests_;
+  }
 
  private:
   LlmConfig cfg_;
+  mutable std::mutex mu_;  // guards total_/requests_ across postAsync threads
   TokenUsage total_{};
   long requests_ = 0;
 };

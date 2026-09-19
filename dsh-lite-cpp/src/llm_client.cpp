@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <future>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 
@@ -131,10 +132,14 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
   }
 
   // Strict token tracking: every successful response accumulates.
-  total_.promptTokens += out.usage.promptTokens;
-  total_.completionTokens += out.usage.completionTokens;
-  total_.totalTokens += out.usage.totalTokens;
-  ++requests_;
+  // Mutex-guarded: postAsync futures may complete on any thread.
+  {
+    std::lock_guard<std::mutex> l(mu_);
+    total_.promptTokens += out.usage.promptTokens;
+    total_.completionTokens += out.usage.completionTokens;
+    total_.totalTokens += out.usage.totalTokens;
+    ++requests_;
+  }
   return out;
 }
 

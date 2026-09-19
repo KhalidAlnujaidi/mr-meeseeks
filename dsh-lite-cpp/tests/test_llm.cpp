@@ -154,6 +154,22 @@ int main() {
           "async result + accounting match sync path");
   }
 
+  // 4b. Concurrent async fan-out: N futures share one client, totals
+  // stay exact (data-race free) and requestCount == N.
+  {
+    constexpr int kFanout = 8;
+    LlmClient llm(cfgFor("/ok"));
+    std::vector<std::future<LlmResponse>> futs;
+    for (int i = 0; i < kFanout; ++i) futs.push_back(llm.postAsync(msgs));
+    for (auto& f : futs) f.get();
+    const auto t = llm.totalUsage();
+    check(llm.requestCount() == kFanout &&
+              t.promptTokens == 10 * kFanout &&
+              t.completionTokens == 5 * kFanout &&
+              t.totalTokens == 15 * kFanout,
+          "concurrent async totals exact, no lost updates");
+  }
+
   // 5. Missing key => throws, no request counted.
   {
     LlmConfig c = cfgFor("/ok");
