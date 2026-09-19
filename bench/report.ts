@@ -25,6 +25,10 @@ interface TauSummary {
   orch_p50_ms?: number; orch_p95_ms?: number; fallback_rate?: number;
   topology_dist?: Record<string, number>; model_worker?: string; model_reviewer?: string;
   prompt_digest?: string; daemon_configured?: boolean; skipped?: boolean;
+  // Condition J only (absent on A/B/C summaries).
+  jev_source_dist?: Record<string, number>;
+  mean_jev_atomic_latency_ms?: number;
+  mean_jev_confidence?: number;
 }
 interface BfclSummary {
   bench?: string; type?: string; n_cases?: number; accuracy?: number;
@@ -47,7 +51,12 @@ function tauSection(s: TauSummary): string[] {
   L.push(`### Condition ${s.condition ?? "?"}${skipped ? " — SKIPPED" : ""}`);
   if (skipped) {
     L.push("");
-    L.push("- skipped (condition A requires TYPESAFE_API_KEY; absent at run time)");
+    // Condition-accurate: any Jev-backed condition (A or J) skips for the
+    // same reason. A's wording is preserved byte-for-byte.
+    const cond = s.condition ?? "A";
+    L.push(cond === "A"
+      ? "- skipped (condition A requires TYPESAFE_API_KEY; absent at run time)"
+      : `- skipped (condition ${cond} requires TYPESAFE_API_KEY; absent at run time)`);
     L.push("");
     return L;
   }
@@ -60,6 +69,13 @@ function tauSection(s: TauSummary): string[] {
   L.push(`- $/task=${usd(s.cost_per_task_usd)} **cost-per-reliability-point=${cprp === null ? "n/a (pass^3 = 0)" : `$${cprp.toExponential(2)}/pt`}**`);
   L.push(`- orch_latency p50=${s.orch_p50_ms ?? "n/a"}ms p95=${s.orch_p95_ms ?? "n/a"}ms fallback_rate=${f2(s.fallback_rate)}`);
   L.push(`- topology: ${topoStr}`);
+  // Condition J only: Jev atomicity provenance + cost. Emitted solely when the
+  // fields are present, so A/B/C rendering is untouched.
+  if (s.jev_source_dist !== undefined || s.mean_jev_atomic_latency_ms !== undefined) {
+    const dist = s.jev_source_dist ?? {};
+    const distStr = Object.keys(dist).sort().map((k) => `${k}=${dist[k]}`).join(", ") || "n/a";
+    L.push(`- jev atomicity: source ${distStr}; mean_jev_atomic_latency=${f2(s.mean_jev_atomic_latency_ms)}ms mean_jev_confidence=${f3(s.mean_jev_confidence)}`);
+  }
   L.push("");
   return L;
 }

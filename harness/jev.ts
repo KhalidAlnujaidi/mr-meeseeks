@@ -60,17 +60,32 @@ export interface JevCallOpts {
   timeoutMs?: number;
 }
 
+type JevAnswers = Record<string, {
+  noul?: number; choice?: string;
+  confidence?: number; probabilities?: Record<string, number>;
+}>;
+
 interface JevCallResult {
-  answers: Record<string, {
-    noul?: number; choice?: string;
-    confidence?: number; probabilities?: Record<string, number>;
-  }>;
+  /** Parsed answers on success; null when the attempt failed or was unusable. */
+  answers: JevAnswers | null;
+  /** REAL elapsed ms for the attempt. 0 only when no attempt was made. */
   latencyMs: number;
 }
 
 /**
- * systemOne(): one lean POST. Returns null on missing key / timeout /
- * non-2xx / bad JSON (caller maps null → {fallback:true}).
+ * systemOne(): one lean POST.
+ *
+ * Latency is reported on EVERY path that actually attempts a call, so
+ * callers can distinguish three cases by number alone:
+ *
+ *   (a) no key        -> null                          -> latencyMs 0  (never attempted)
+ *   (b) key, failure  -> {answers:null, latencyMs: N}  -> real elapsed N (hundreds of ms)
+ *   (c) key, success  -> {answers,      latencyMs: N}  -> real elapsed N
+ *
+ * Only the missing-key path returns null: it is the one case where nothing
+ * was sent, so 0 is the honest number rather than a discarded measurement.
+ * Every failure path still yields NO answers, so call sites keep mapping it
+ * to {fallback:true} — verdicts are unchanged, only the timing is recovered.
  * Throws only on caller misuse (empty questions map).
  */
 async function systemOne(
@@ -81,7 +96,7 @@ async function systemOne(
   if (Object.keys(questions).length === 0) throw new Error("jev: questions required");
   const env = opts.env ?? process.env;
   const key = env["TYPESAFE_API_KEY"];
-  if (!key) return null; // no key configured: degrade, don't block
+  if (!key) return null; // no key configured: degrade, don't block, 0ms by definition
   const t0 = Date.now();
   let res: Response;
   try {
@@ -92,17 +107,24 @@ async function systemOne(
       signal: AbortSignal.timeout(opts.timeoutMs ?? JEV_DEFAULT_TIMEOUT_MS),
     });
   } catch {
-    return null;
+    return { answers: null, latencyMs: Date.now() - t0 }; // transport error / timeout
   }
-  if (!res.ok) return null;
-  let data: { answers?: JevCallResult["answers"] };
+  if (!res.ok) return { answers: null, latencyMs: Date.now() - t0 }; // non-2xx (e.g. bad auth)
+  let data: { answers?: JevAnswers };
   try {
     data = (await res.json()) as typeof data;
   } catch {
-    return null;
+    return { answers: null, latencyMs: Date.now() - t0 }; // unparseable body
   }
-  if (!data.answers || typeof data.answers !== "object") return null;
+  if (!data.answers || typeof data.answers !== "object") {
+    return { answers: null, latencyMs: Date.now() - t0 }; // well-formed JSON, no usable answers
+  }
   return { answers: data.answers, latencyMs: Date.now() - t0 };
+}
+
+/** True when a systemOne outcome carries usable answers. */
+function hasAnswers(r: JevCallResult | null): r is JevCallResult & { answers: JevAnswers } {
+  return r !== null && r.answers !== null;
 }
 
 export interface AtomicCheck {
@@ -143,7 +165,11 @@ export async function checkAtomicityNoul(
     },
     { ...opts, timeoutMs: opts.timeoutMs ?? JEV_ATOMIC_BUDGET_MS },
   );
-  if (!r) return { atomic: false, confidence: 0, latencyMs: 0, fallback: true };
+  if (!hasAnswers(r)) {
+    // No signal. latencyMs is 0 for "no key, never attempted" and the real
+    // elapsed ms when a call was made and failed — see systemOne().
+    return { atomic: false, confidence: 0, latencyMs: r?.latencyMs ?? 0, fallback: true };
+  }
   const p = r.answers["atomic"]?.noul;
   if (typeof p !== "number") return { atomic: false, confidence: 0, latencyMs: r.latencyMs, fallback: true };
   const atomic = p >= 0.5;
@@ -186,7 +212,9 @@ export async function chooseTopology(
     },
     opts,
   );
-  if (!r) return { topology: FALLBACK_TOPOLOGY, confidence: 0, probabilities: {}, latencyMs: 0, fallback: true };
+  if (!hasAnswers(r)) {
+    return { topology: FALLBACK_TOPOLOGY, confidence: 0, probabilities: {}, latencyMs: r?.latencyMs ?? 0, fallback: true };
+  }
   const a = r.answers["topology"];
   if (!a || typeof a.choice !== "string" || !isTopology(a.choice)) {
     return { topology: FALLBACK_TOPOLOGY, confidence: 0, probabilities: {}, latencyMs: r.latencyMs, fallback: true };
@@ -244,7 +272,9 @@ export async function verifyGate(
     },
     opts,
   );
-  if (!r) return { pass: false, confidence: 0, escalate: true, latencyMs: 0, fallback: true };
+  if (!hasAnswers(r)) {
+    return { pass: false, confidence: 0, escalate: true, latencyMs: r?.latencyMs ?? 0, fallback: true };
+  }
   const p = r.answers["meets"]?.noul;
   if (typeof p !== "number") return { pass: false, confidence: 0, escalate: true, latencyMs: r.latencyMs, fallback: true };
   return {
@@ -288,7 +318,9 @@ export async function batchPrune(
     };
   }
   const r = await systemOne(`Run context: ${context}`, questions, opts);
-  if (!r) return { keep: items.map((i) => i.id), drop: [], latencyMs: 0, fallback: true };
+  if (!hasAnswers(r)) {
+    return { keep: items.map((i) => i.id), drop: [], latencyMs: r?.latencyMs ?? 0, fallback: true };
+  }
   const keep: string[] = [];
   const drop: { id: string; p: number }[] = [];
   for (const it of items) {
