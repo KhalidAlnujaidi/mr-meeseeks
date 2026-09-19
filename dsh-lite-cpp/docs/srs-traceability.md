@@ -27,8 +27,9 @@ Each SRS requirement, where it lives, and which test proves it.
 
 | SRS clause | Implementation | Test |
 |---|---|---|
-| Async HTTPS POST, OpenAI-compliant, TLS | src/llm_client.cpp (httplib + OpenSSL) | code-reviewed; live path needs OPENROUTER_API_KEY |
-| Strict token tracking | totalUsage()/requestCount() | accumulator in post() |
+| Async HTTPS POST, OpenAI-compliant, TLS | src/llm_client.cpp (httplib::SSLClient + OpenSSL; http:// Client shares the same payload/parse/accounting path) | test_llm 1 (payload shape), 4 (async future); live path for TLS handshake |
+| Strict token tracking | totalUsage()/requestCount() | test_llm 1-3 (parse, accumulate, zero-usage) |
+| Error paths: missing key, non-200, malformed JSON, bad scheme | resolveKey/splitUrl/parse guards | test_llm 5-8 |
 | vector<Message> roles system/user/assistant | include/dshlite/llm_client.hpp + brain.cpp | test_brain 1 |
 | Judge hook before delegation | makeNodeJudgeHook (node harness/loop.ts judge in isolated worker) | test_brain 2 + live probe (act:do_direct, conf 0.8) |
 | Judge timeout => escalate, never unverified/locked | fallback() in brain.cpp | test_brain 3-5 + live no-key probe (escalate) |

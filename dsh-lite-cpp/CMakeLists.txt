@@ -57,7 +57,7 @@ add_executable(dsh-lite src/main.cpp)
 target_link_libraries(dsh-lite PRIVATE dshlite)
 
 enable_testing()
-foreach(t IN ITEMS sanitizer spawner brain)
+foreach(t IN ITEMS sanitizer spawner brain llm)
   add_executable(test-${t} tests/test_${t}.cpp)
   target_link_libraries(test-${t} PRIVATE dshlite)
   add_test(NAME test-${t} COMMAND test-${t})

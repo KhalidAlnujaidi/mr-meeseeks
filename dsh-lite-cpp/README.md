@@ -18,8 +18,14 @@ include/dshlite/brain.hpp       Module 3b: Executive Iteration Loop
 src/brain.cpp                   (vector<Message> history, judge hook BEFORE delegation,
                                  judge timeout/failure => escalate to user, never unverified)
 src/main.cpp                    dsh-lite demo binary
-tests/test_{sanitizer,spawner,brain}.cpp   milestone acceptance suites
+tests/test_{sanitizer,spawner,brain,llm}.cpp   milestone acceptance suites
 tests/bench_sanitizer.cpp       10 MB / 15 ms perf gate
+tests/test_llm.cpp uses an in-process loopback stub server (no network,
+no keys, no TLS certs): it proves the OpenAI-compliant payload shape,
+response ingestion, strict token accumulation, the async path, and the
+missing-key / non-200 / malformed-JSON / bad-scheme error paths. The
+TLS handshake itself is provided by OpenSSL via httplib::SSLClient and
+is exercised only on the live path (./build/dsh-lite "question").
 
 ## Deps (SRS stack)
 
