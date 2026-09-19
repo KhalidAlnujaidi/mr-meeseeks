@@ -6,6 +6,7 @@
 #include <map>
 #include <string>
 
+#include "dshlite/grammar.hpp"
 #include "dshlite/spawner.hpp"
 
 namespace dshlite {
@@ -307,6 +308,41 @@ BrainLoop::TaskReport BrainLoop::runGatedTask(const std::string& taskId,
     emit(ev);
     current = std::move(nextPayload);
   }
+}
+
+BrainLoop::SolicitResult BrainLoop::solicitToolPayload(
+    const std::string& prompt, const std::vector<ToolSchema>& tools) {
+  SolicitResult out;
+  // G2.4: build the payload grammar from the registered tool schemas
+  // (F49: enum span for names, args constrained only for the single-
+  // tool case; the engine compiler is fail-closed on anything else).
+  const ResponseFormat rf = toolPayloadFormat(tools);  // throws on empty tools
+  std::vector<Message> msgs{{"user", prompt}};
+  LlmResponse r;
+  try {
+    // postConstrained: default-forwarding virtual (F48) means fakes
+    // still work — they just ignore the grammar, which is F45-honest.
+    r = llm_.postConstrained(msgs, rf);
+  } catch (const GrammarUnsupportedError&) {
+    // F46 at the poster level (no router in play): retry once WITHOUT
+    // the grammar — a draft accelerator must never make solicitation
+    // impossible on an incapable family. The gate still enforces.
+    r = llm_.post(msgs);
+  }
+  out.raw = r.content;
+  try {
+    out.payload = parseStrictPayload(r.content);
+    out.ok = true;
+  } catch (const PayloadFormatError& e) {
+    out.ok = false;
+    out.formatError = e.what();
+    LedgerEvent ev;
+    ev.type = "nudge";
+    ev.role = "worker";
+    ev.detail = std::string("solicit: strict parse failed — ") + e.what();
+    emit(ev);
+  }
+  return out;
 }
 
 JudgeVerdict BrainLoop::gateDelegation(const std::string& criterion) {

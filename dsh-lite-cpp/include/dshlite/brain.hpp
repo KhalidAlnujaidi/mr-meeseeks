@@ -104,6 +104,25 @@ class BrainLoop {
                           const SpawnOptions& opt,
                           RetryPlanner planner = {});
 
+  /// G2.4 solicit: ask the model for a tool payload under a
+  /// response_format grammar (built from `tools`), then STRICT-parse
+  /// the reply (F45: the grammar is a draft accelerator, never an
+  /// output guarantee — prose/malformed replies are possible on ANY
+  /// engine). On success the caller holds pre-validated JSON ready for
+  /// runGatedTask's checkPayload — the gate receives structure, not
+  /// prose, which is what reduces nudge loops. On format failure the
+  /// caller owns retry/nudge (this method never loops, never repairs,
+  /// never extracts substrings). History is NOT touched: solicitation
+  /// is a leaf question, not an executive turn.
+  struct SolicitResult {
+    bool ok = false;              ///< strict parse succeeded
+    nlohmann::json payload;       ///< parsed {"tool":...,"args":...} when ok
+    std::string raw;              ///< verbatim model content (evidence)
+    std::string formatError;      ///< PayloadFormatError text when !ok
+  };
+  SolicitResult solicitToolPayload(const std::string& prompt,
+                                   const std::vector<ToolSchema>& tools);
+
   /// One executive turn: strategy text in, assistant text out.
   /// Appends to history_; throws only what ILlmPoster::post throws.
   /// Integration laws: the user message is appended BEFORE compaction

@@ -21,6 +21,10 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
+#include "dshlite/grammar.hpp"
+
 namespace dshlite {
 
 struct Message {
@@ -124,6 +128,17 @@ struct LlmStallError : std::runtime_error {
   long bytesSeen;   ///< total wire chunks received before the stall
 };
 
+/// G2.4/F46: typed engine refusal of a response_format grammar — the
+/// engine's family lacks grammar_payload (family_registry.py), so the
+/// gateway answers HTTP 400 unsupported_parameter (verbatim observed on
+/// olmoe: "`response_format` grammars are not supported by the olmoe
+/// engine yet."). Distinct type so the router classifies it as
+/// "grammar-unsupported" — its own attempt outcome — and an exhausted
+/// pool cites the grammar refusal instead of a generic transport error.
+struct GrammarUnsupportedError : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
 /// Decode velocity (roadmap G3.1/F13): completion tokens over DECODE
 /// wall time (latency - ttft when streaming, full latency otherwise —
 /// prefill/TTFT is disk-bound warmup, not decode). Returns 0.0 when
@@ -136,6 +151,16 @@ class ILlmPoster {
  public:
   virtual ~ILlmPoster() = default;
   virtual LlmResponse post(const std::vector<Message>& messages) = 0;
+  /// G2.4 constrained variant (F48): solicit a response under a
+  /// response_format (grammar-forced DRAFTS on capable engines — F45:
+  /// never a hard output constraint; the host gate stays the
+  /// enforcement). Default forwards to post() so every existing test
+  /// fake keeps compiling unchanged; LlmClient/ModelRouter override.
+  virtual LlmResponse postConstrained(const std::vector<Message>& messages,
+                                      const ResponseFormat& rf) {
+    (void)rf;
+    return post(messages);
+  }
 };
 
 class LlmClient : public ILlmPoster {
@@ -147,6 +172,15 @@ class LlmClient : public ILlmPoster {
   /// transport failure, non-200 status (incl. 404 model_not_found when
   /// cfg.model != engine --model-id), or malformed JSON.
   LlmResponse post(const std::vector<Message>& messages) override;
+
+  /// G2.4: post with body.response_format set (grammar-forced drafts,
+  /// F45/F46). Throws std::invalid_argument at request build time for
+  /// malformed formats (F47 — same causes the gateway 400s on) and
+  /// GrammarUnsupportedError when the engine's family lacks
+  /// grammar_payload (HTTP 400 unsupported_parameter, F46) so the
+  /// router can classify it as its own attempt outcome.
+  LlmResponse postConstrained(const std::vector<Message>& messages,
+                              const ResponseFormat& rf) override;
 
   /// Non-blocking POST; exceptions surface on future::get().
   std::future<LlmResponse> postAsync(const std::vector<Message>& messages);
@@ -161,6 +195,11 @@ class LlmClient : public ILlmPoster {
   }
 
  private:
+  /// Shared body of post()/postConstrained(): rfWire == nullptr sends
+  /// the pre-G2.4 wire shape byte-identically; non-null injects it as
+  /// body.response_format.
+  LlmResponse postImpl(const std::vector<Message>& messages,
+                       const nlohmann::json* rfWire);
   LlmConfig cfg_;
   mutable std::mutex mu_;  // guards total_/requests_ across postAsync threads
   TokenUsage total_{};

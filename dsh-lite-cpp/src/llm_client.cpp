@@ -80,6 +80,19 @@ std::future<LlmResponse> LlmClient::postAsync(
 }
 
 LlmResponse LlmClient::post(const std::vector<Message>& messages) {
+  return postImpl(messages, nullptr);
+}
+
+LlmResponse LlmClient::postConstrained(const std::vector<Message>& messages,
+                                       const ResponseFormat& rf) {
+  if (rf.empty()) return postImpl(messages, nullptr);  // text => plain wire
+  // F47: validate BEFORE the round-trip (same causes the gateway 400s).
+  const nlohmann::json wire = rf.toWire();  // throws std::invalid_argument
+  return postImpl(messages, &wire);
+}
+
+LlmResponse LlmClient::postImpl(const std::vector<Message>& messages,
+                                const nlohmann::json* rfWire) {
   const SplitUrl u = splitUrl(cfg_.endpoint);
   const bool loopback = isLoopback(u.host);
   // Loopback engines need no key; non-loopback binds require one.
@@ -106,6 +119,7 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
     if (cfg_.requestUsageInStream)
       body["stream_options"] = {{"include_usage", true}};
   }
+  if (rfWire) body["response_format"] = *rfWire;  // G2.4 grammar-forced drafts
   const std::string payload = body.dump();
 
   httplib::Headers headers;
@@ -290,6 +304,17 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
     const std::string hint = (res->status == 404)
                                  ? " (model_not_found: cfg.model != engine --model-id?)"
                                  : "";
+    // F46: grammar refusal is its own typed failure — the engine family
+    // lacks grammar_payload (verbatim gateway signature observed live on
+    // olmoe: code unsupported_parameter, param response_format).
+    if (res->status == 400 && rfWire &&
+        res->body.find("\"code\":\"unsupported_parameter\"") != std::string::npos &&
+        res->body.find("response_format") != std::string::npos) {
+      throw GrammarUnsupportedError(
+          "llm: grammar-unsupported — engine family lacks grammar_payload "
+          "(HTTP 400 unsupported_parameter from " +
+          u.host + "): " + res->body.substr(0, 300));
+    }
     throw std::runtime_error("llm: HTTP " + std::to_string(res->status) +
                              " from " + u.host + hint + ": " +
                              res->body.substr(0, 500));

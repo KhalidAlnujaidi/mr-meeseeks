@@ -181,14 +181,30 @@ bool ModelRouter::velocityAborts(const EngineEntry& e, const LlmResponse& resp,
 }
 
 RoutedResponse ModelRouter::post(Role role, const std::vector<Message>& messages) {
+  return postImpl_(role, messages, nullptr);
+}
+
+RoutedResponse ModelRouter::postConstrained(Role role,
+                                            const std::vector<Message>& messages,
+                                            const ResponseFormat& rf) {
+  return postImpl_(role, messages, &rf);
+}
+
+RoutedResponse ModelRouter::postImpl_(Role role,
+                                      const std::vector<Message>& messages,
+                                      const ResponseFormat* rf) {
   const auto& pool = poolFor(role);
   RoutedResponse out;
   std::string lastErr;
+  // F46 fail-loud: when EVERY attempt died on grammar refusal, the
+  // exhausted-pool throw must cite the grammar, not a generic error.
+  long grammarRefusals = 0;
   for (size_t i = 0; i < pool.size(); ++i) {
     RouteAttempt att{pool[i].endpoint, pool[i].modelId, "", ""};
     const long turnsSeen = turnCounters_[poolOffset_(role) + i]->load();
     try {
-      LlmResponse resp = clientFor(role, i).post(messages);
+      LlmResponse resp = rf ? clientFor(role, i).postConstrained(messages, *rf)
+                            : clientFor(role, i).post(messages);
       // G3.2: velocity floor AFTER the response — a too-slow engine is a
       // routing failure, so the pool falls through exactly like a stall.
       if (velocityAborts(pool[i], resp, turnsSeen)) {
@@ -220,6 +236,16 @@ RoutedResponse ModelRouter::post(Role role, const std::vector<Message>& messages
       att.detail = e.what();
       lastErr = e.what();
       out.attempts.push_back(std::move(att));
+    } catch (const GrammarUnsupportedError& e) {
+      // G2.4/F46: the family lacks grammar_payload. Its own outcome
+      // vocabulary; fall through to the next family (a capable one may
+      // still serve the constrained request). Failed turns count (F14).
+      turnCounters_[poolOffset_(role) + i]->fetch_add(1);
+      ++grammarRefusals;
+      att.outcome = "grammar-unsupported";
+      att.detail = e.what();
+      lastErr = e.what();
+      out.attempts.push_back(std::move(att));
     } catch (const std::exception& e) {
       turnCounters_[poolOffset_(role) + i]->fetch_add(1);  // failed turns warm too
       att.outcome = classify(e);
@@ -230,6 +256,15 @@ RoutedResponse ModelRouter::post(Role role, const std::vector<Message>& messages
       // different family). Never cross into the brain pool.
     }
   }
+  if (grammarRefusals == static_cast<long>(pool.size()))
+    throw std::runtime_error(
+        std::string("router: ") + roleName(role) + " pool exhausted — EVERY entry (" +
+        std::to_string(pool.size()) +
+        ") refused the response_format grammar (families lack grammar_payload, "
+        "F46): " +
+        lastErr + " — route constrained requests to a grammar-capable family "
+                  "(glm) or drop response_format; the brain pool is never a "
+                  "fallback target (F2)");
   throw std::runtime_error(
       std::string("router: ") + roleName(role) + " pool exhausted (" +
       std::to_string(pool.size()) + " entries failed; last: " + lastErr +

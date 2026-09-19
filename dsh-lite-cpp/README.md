@@ -47,6 +47,14 @@ src/compaction.cpp              (G2.5/F1: std::vector<Message>, 8192/4096/1024
                                  [HOST COMPACTION] marker with reserved budget;
                                  E.2.3 result vector, BUS_VALUE_TOO_LARGE refuse-
                                  never-truncate; all text via Module 1 sanitizer)
+include/dshlite/grammar.hpp     G2.4: grammar-forced tool payload drafts
+src/grammar.cpp                 (colibri response_format wire contract:
+                                 json_object/json_schema/gbnf; F47 local
+                                 validation mirrors gateway 400s; F49/F50
+                                 schema-subset laws; F45 strict payload
+                                 parse — the grammar ACCELERATES drafts,
+                                 the host gate stays the enforcement;
+                                 F46 grammar_payload family table)
 include/dshlite/usage_probe.hpp P1: safe .coli_usage expert-heat reader
 src/usage_probe.cpp             (route_trace.h format: v1 headers, sparse
                                  triples, legacy, IKU1 refused by magic;
@@ -54,7 +62,7 @@ src/usage_probe.cpp             (route_trace.h format: v1 headers, sparse
                                  temp+rename (F37); warm=mtime-fresh (F38);
                                  best-effort telemetry, gates nothing (F5))
 src/main.cpp                    dsh-lite demo binary
-tests/test_{sanitizer,spawner,brain,llm,router,ledger,nudge,stall,f33_p1,g4_stress}.cpp   milestone acceptance suites
+tests/test_{sanitizer,spawner,brain,llm,router,ledger,nudge,stall,f33_p1,g4_stress,grammar}.cpp   milestone acceptance suites
 tests/g4_run.cpp                Gap 4 live-run driver (needs running engines; ledger to /tmp)
 tests/bench_sanitizer.cpp       10 MB / 15 ms perf gate
 tests/test_llm.cpp uses an in-process loopback stub server that mimics

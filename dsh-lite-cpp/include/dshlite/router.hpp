@@ -118,6 +118,18 @@ class ModelRouter {
   /// when every entry failed — escalate, never touch the brain pool.
   RoutedResponse post(Role role, const std::vector<Message>& messages);
 
+  /// G2.4: same dispatch under a response_format (grammar-forced
+  /// DRAFTS — F45: an accelerator, never an output guarantee; the host
+  /// gate stays the enforcement). F46: an engine whose family refuses
+  /// the grammar (HTTP 400 unsupported_parameter) records attempt
+  /// outcome "grammar-unsupported" and the pool falls through to the
+  /// next family; if EVERY entry refused on grammar grounds the throw
+  /// cites the grammar rejection (fail-loud — misconfiguration must
+  /// not hide behind a generic transport error).
+  RoutedResponse postConstrained(Role role,
+                                 const std::vector<Message>& messages,
+                                 const ResponseFormat& rf);
+
   /// Non-blocking variant; exceptions surface on future::get().
   std::future<RoutedResponse> postAsync(Role role,
                                         std::vector<Message> messages);
@@ -139,6 +151,11 @@ class ModelRouter {
 
  private:
   const std::vector<EngineEntry>& poolFor(Role role) const;
+  /// Shared dispatch for post()/postConstrained(): rf == nullptr sends
+  /// the plain wire; non-null passes the response_format to each
+  /// pooled client (G2.4).
+  RoutedResponse postImpl_(Role role, const std::vector<Message>& messages,
+                           const ResponseFormat* rf);
   /// Offset of the role's pool inside clients_/turnCounters_.
   size_t poolOffset_(Role role) const {
     switch (role) {

@@ -244,3 +244,45 @@ G2.4 (structured payloads / grammar forcing) may slip past step 5 for
 the first benchmark if leaves stay text-report-only — the gate applies
 to tool payloads, and the first run can restrict leaves to
 report-shaped output, which G2.5 already compacts.
+
+---
+
+## G2.4 addendum — grammar-forced drafts (implemented, F45-F50)
+
+Audited against the LIVE wire (coli serve + openai_server.py:2658-2689,
+schema_gbnf.h, family_registry.py, docs/grammar-draft.md) before coding:
+
+- **F45 (premise correction):** colibri's grammar is a speculative DRAFT
+  SOURCE, never a sampling constraint — forced spans are verified by the
+  target model, so no grammar can guarantee "100% strict JSON". The G2
+  payload gate remains the ONLY hard enforcement; grammar reduces nudge
+  frequency, not gate necessity. `parseStrictPayload` is whole-string,
+  no repair/no substring extraction; failures feed the nudge loop.
+- **F46 (capability):** `grammar_payload` is per-family — glm=True only;
+  olmoe/qwen/deepseek/kimi/inkling=False ⇒ gateway HTTP 400
+  `unsupported_parameter` (verbatim signature captured live). Typed
+  `GrammarUnsupportedError` ⇒ router attempt outcome
+  "grammar-unsupported" ⇒ fallthrough to a capable family; all-refusing
+  pool ⇒ exhausted throw CITES the grammar (fail-loud, no masking).
+  `solicitToolPayload` retries once unconstrained so solicitation is
+  never impossible on an incapable family.
+- **F47 (local mirror of gateway 400s):** type/schema-shape/1 MiB/NUL/
+  missing root-rule and empty-tools all rejected at config time.
+- **F48 (seam):** `ILlmPoster::postConstrained` defaulted virtual
+  forwarding to `post()` — every existing fake keeps compiling; fakes
+  ignoring the grammar is F45-honest.
+- **F49/F50 (schema subset laws from schema_gbnf.h):** compiler accepts
+  only object+properties(+required listing EVERY property)/string(+enum,
+  const)/number/integer/boolean/null/array+items(+minItems 0|1);
+  anything else fail-closed ⇒ silent no-grammar. No anyOf ⇒ multi-tool
+  payloads constrain the tool-name enum span ONLY; args constrained only
+  in the single-tool case. Bare `{"type":"object"}` and empty-properties
+  are compiler traps — never emitted.
+- Wire: `response_format` ∈ {text(omitted), json_object, json_schema
+  (wrapped under json_schema.schema), gbnf (raw, root rule required)}.
+- Verified live: constrained request to the olmoe engine produced the
+  typed error from the REAL gateway; plain post unaffected (PONG).
+- Tests: test-grammar 26 checks (wire shapes, F47 validation, F49/F50
+  builders, body-capture passing, F46 typed refusal + router
+  fallthrough + fail-loud exhaustion, F45 strict parse, solicit
+  composition incl. gate-receives-structure and nudge-line emission).

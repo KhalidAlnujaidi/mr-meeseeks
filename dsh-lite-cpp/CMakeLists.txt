@@ -40,6 +40,7 @@ add_library(dshlite STATIC
   src/sanitizer.cpp
   src/spawner.cpp
   src/llm_client.cpp
+  src/grammar.cpp
   src/router.cpp
   src/ledger.cpp
   src/usage_probe.cpp
@@ -84,7 +85,7 @@ add_executable(g4-run tests/g4_run.cpp)
 target_link_libraries(g4-run PRIVATE dshlite)
 
 enable_testing()
-foreach(t IN ITEMS sanitizer spawner brain llm router ledger nudge stall f33_p1 g4_stress)
+foreach(t IN ITEMS sanitizer spawner brain llm router ledger nudge stall f33_p1 g4_stress grammar)
   add_executable(test-${t} tests/test_${t}.cpp)
   target_link_libraries(test-${t} PRIVATE dshlite)
   add_test(NAME test-${t} COMMAND test-${t})
