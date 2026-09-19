@@ -54,7 +54,8 @@ src/usage_probe.cpp             (route_trace.h format: v1 headers, sparse
                                  temp+rename (F37); warm=mtime-fresh (F38);
                                  best-effort telemetry, gates nothing (F5))
 src/main.cpp                    dsh-lite demo binary
-tests/test_{sanitizer,spawner,brain,llm,router,ledger,nudge,stall,f33_p1}.cpp   milestone acceptance suites
+tests/test_{sanitizer,spawner,brain,llm,router,ledger,nudge,stall,f33_p1,g4_stress}.cpp   milestone acceptance suites
+tests/g4_run.cpp                Gap 4 live-run driver (needs running engines; ledger to /tmp)
 tests/bench_sanitizer.cpp       10 MB / 15 ms perf gate
 tests/test_llm.cpp uses an in-process loopback stub server that mimics
 `coli serve` (404 unless body.model matches the served id; no keys, no

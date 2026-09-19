@@ -17,7 +17,9 @@
 #include <thread>
 #include <vector>
 
+#include <sys/stat.h>
 #include <unistd.h>
+#include <utime.h>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -325,6 +327,60 @@ int main() {
               j2["gate"] == "VELOCITY" && j2["code"] == "VELOCITY_FLOOR" &&
               !j2.contains("parent_id"),
           "v2: optional fields omitted, DENY codes present");
+  }
+
+  // ── F39 heat -> cache.warm wiring ──────────────────────────────────
+  {
+    const std::string dir = "/tmp/hermes-heat-" + std::to_string(::getpid());
+    ::mkdir(dir.c_str(), 0755);
+    const std::string warmPath = dir + "/warm";
+    const std::string coldPath = dir + "/cold";
+    {
+      std::ofstream o(warmPath);
+      o << "-1 16 64\n-2 1 7\n0 1 5\n";  // fresh mtime => warm
+    }
+    {
+      std::ofstream o(coldPath);
+      o << "0 1 5\n";
+    }  // closed+flushed HERE, before utime — else close resets mtime to now
+    struct utimbuf tb {};
+    tb.actime = 1000000000;  // 2001 => stale mtime => not warm
+    tb.modtime = 1000000000;
+    ::utime(coldPath.c_str(), &tb);
+
+    // Warm probe => cache block emitted with warm:true.
+    LedgerEvent ev;
+    ev.type = "report"; ev.taskId = "h1"; ev.role = "brain";
+    ev.model = "olmoe-colibri"; ev.endpoint = "127.0.0.1:8081";
+    attachCacheHeat(ev, probeUsageFile(warmPath));
+    const auto jw = nlohmann::json::parse(LedgerWriter::serialize(ev, "2026-09-19T12:00:00.000Z"));
+    check(jw.contains("cache") && jw["cache"]["warm"] == true,
+          "F39: warm heat file => cache.warm=true emitted");
+
+    // Cold (parsed, stale mtime) => cache block present with warm:false.
+    LedgerEvent ev2 = ev;
+    ev2.taskId = "h2";
+    attachCacheHeat(ev2, probeUsageFile(coldPath));
+    const auto jc = nlohmann::json::parse(LedgerWriter::serialize(ev2, "2026-09-19T12:00:00.000Z"));
+    check(jc.contains("cache") && jc["cache"]["warm"] == false,
+          "F39: parsed-but-stale => cache.warm=false (observed cold, not absent)");
+
+    // Missing file => NO cache block at all (absence != cold, F39).
+    LedgerEvent ev3 = ev;
+    ev3.taskId = "h3";
+    attachCacheHeat(ev3, probeUsageFile(dir + "/nope"));
+    const auto jm = nlohmann::json::parse(LedgerWriter::serialize(ev3, "2026-09-19T12:00:00.000Z"));
+    check(!jm.contains("cache"),
+          "F39: missing heat file => cache block OMITTED (never warm:false)");
+
+    // Schema validity preserved: every line is still v2 and single-line.
+    check(jw.value("schema", 0) == 2 && jc.value("schema", 0) == 2 &&
+              jm.value("schema", 0) == 2,
+          "F39: cache wiring keeps ledger v2 schema valid");
+
+    ::remove(warmPath.c_str());
+    ::remove(coldPath.c_str());
+    ::rmdir(dir.c_str());
   }
 
   // ── fromRouted wiring (RoutedResponse -> v2 event) ─────────────────

@@ -25,6 +25,7 @@
 #include "dshlite/ledger.hpp"
 #include "dshlite/nudge.hpp"
 #include "dshlite/router.hpp"
+#include "dshlite/usage_probe.hpp"
 
 namespace {
 // Router-backed poster so BrainLoop::turn() traffic flows through the
@@ -34,6 +35,9 @@ namespace {
 struct RouterPoster : dshlite::ILlmPoster {
   dshlite::ModelRouter& router;
   dshlite::LedgerWriter* ledger = nullptr;
+  /// P1 heat file (F39): when non-empty, each brain report line carries
+  /// a fresh probe's cache block. Telemetry only — never gates (F5).
+  std::string usagePath;
   long turnNo = 0;
   explicit RouterPoster(dshlite::ModelRouter& r) : router(r) {}
   dshlite::LlmResponse post(const std::vector<dshlite::Message>& m) override {
@@ -42,12 +46,18 @@ struct RouterPoster : dshlite::ILlmPoster {
       ++turnNo;
       auto ev = dshlite::LedgerWriter::fromRouted(
           "report", "brain", "g4.brain-turn" + std::to_string(turnNo), 0, rr);
-      // F33 finding: colibri SSE streams carry NO usage chunk (verified
-      // by raw curl) — streamed turns honestly record 0 tokens (F12),
-      // never invented. Non-streaming calls DO return usage.
+      // F33/F34: usage comes from the engine's include_usage chunk when
+      // the gateway honors it (authoritative); otherwise a flagged
+      // delta-count estimate (tokens_estimated in the cost block).
       if (!rr.attempts.empty())
         ev.detail = "attempts=" + std::to_string(rr.attempts.size()) +
                     " last=" + rr.attempts.back().outcome;
+      if (!usagePath.empty()) {
+        // Fresh probe per turn (F37: never throws, never locks; the
+        // engine publishes via temp+rename so this is always a whole
+        // snapshot or nothing).
+        dshlite::attachCacheHeat(ev, dshlite::probeUsageFile(usagePath));
+      }
       ledger->append(ev);
     }
     return rr.response;
@@ -107,6 +117,9 @@ int main(int argc, char** argv) {
 
   RouterPoster poster(router);
   poster.ledger = &ledger;
+  // F39: heat wiring is opt-in via COLI_USAGE (same env var the engine
+  // itself reads). Empty => no probe, no cache block (F5 best-effort).
+  if (const char* u = std::getenv("COLI_USAGE")) poster.usagePath = u;
   BrainLoop brain(poster, [](const std::string& c) -> JudgeVerdict {
     // Local atomicity heuristic (no remote judge, F9): one-liner criteria
     // are atomic; anything compound splits once. The C++ lane's real

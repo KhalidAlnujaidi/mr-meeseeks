@@ -109,4 +109,12 @@ LedgerEvent LedgerWriter::fromRouted(const std::string& type, const std::string&
   return ev;
 }
 
+void attachCacheHeat(LedgerEvent& ev, const UsageProbe& probe) {
+  // F39: no parse => no cache block at all (absence = "no heat data",
+  // distinct from an observed cold file). Warm/cold is pure telemetry
+  // (F5): the gate path must never read these fields yet.
+  ev.hasCache = probe.ok;
+  ev.cacheWarm = probe.ok && probe.warm;
+}
+
 }  // namespace dshlite

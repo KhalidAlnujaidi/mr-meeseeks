@@ -15,6 +15,7 @@
 
 #include "dshlite/llm_client.hpp"
 #include "dshlite/router.hpp"
+#include "dshlite/usage_probe.hpp"
 
 namespace dshlite {
 
@@ -89,5 +90,13 @@ class LedgerWriter {
 
 /// UTC ISO-8601 with millisecond precision: 2026-09-19T12:00:00.000Z
 std::string utcNowIso();
+
+/// Heat -> cache.warm wiring (roadmap G3.3/F5/F39): attach a P1
+/// UsageProbe snapshot to an event. probe.ok => cache block emitted
+/// with warm=probe.warm; !ok (missing/unparsable file) => the block is
+/// OMITTED entirely, never warm:false — absence means "no heat data",
+/// not "cold". Best-effort telemetry ONLY: nothing may gate on this
+/// until the roadmap A/B says so (F5 law).
+void attachCacheHeat(LedgerEvent& ev, const UsageProbe& probe);
 
 }  // namespace dshlite
