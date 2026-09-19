@@ -304,20 +304,27 @@ LlmResponse LlmClient::postImpl(const std::vector<Message>& messages,
     const std::string hint = (res->status == 404)
                                  ? " (model_not_found: cfg.model != engine --model-id?)"
                                  : "";
+    // F56: on the STREAMING path a non-200 body is consumed by the SSE
+    // content receiver, so res->body is EMPTY and any body-substring
+    // classification (F46 grammar refusal, 404 hint) would silently
+    // degrade to generic http-4xx. The receiver buffered the raw error
+    // bytes in sse.partial — use them for classification + evidence.
+    const std::string& errBody =
+        (cfg_.stream && res->body.empty()) ? sse.partial : res->body;
     // F46: grammar refusal is its own typed failure — the engine family
     // lacks grammar_payload (verbatim gateway signature observed live on
     // olmoe: code unsupported_parameter, param response_format).
     if (res->status == 400 && rfWire &&
-        res->body.find("\"code\":\"unsupported_parameter\"") != std::string::npos &&
-        res->body.find("response_format") != std::string::npos) {
+        errBody.find("\"code\":\"unsupported_parameter\"") != std::string::npos &&
+        errBody.find("response_format") != std::string::npos) {
       throw GrammarUnsupportedError(
           "llm: grammar-unsupported — engine family lacks grammar_payload "
           "(HTTP 400 unsupported_parameter from " +
-          u.host + "): " + res->body.substr(0, 300));
+          u.host + "): " + errBody.substr(0, 300));
     }
     throw std::runtime_error("llm: HTTP " + std::to_string(res->status) +
                              " from " + u.host + hint + ": " +
-                             res->body.substr(0, 500));
+                             errBody.substr(0, 500));
   }
 
   LlmResponse out;

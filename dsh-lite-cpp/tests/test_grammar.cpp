@@ -459,6 +459,35 @@ int main() {
           "8/F46: grammar refusal => silent unconstrained retry, solicit succeeds");
   }
 
+  // ── 9. F56 regression: STREAMING 400 must still classify as the typed
+  // grammar refusal. On the streaming path the client attaches an SSE
+  // content receiver, so a non-200 body is consumed into sse.partial and
+  // res->body is EMPTY. Pre-fix, the substring check ran against the
+  // empty res->body => generic http-4xx runtime_error (typed error lost,
+  // solicit's F46 fallback would NOT fire). Post-fix it reads sse.partial.
+  {
+    GrammarStub streamRefuse;
+    streamRefuse.refuseGrammar = true;
+    streamRefuse.start("olmoe-colibri", 19010);
+    LlmConfig sc = stubCfg(streamRefuse);
+    sc.stream = true;  // the path g4-run actually uses
+    LlmClient sllm(sc);
+    bool typed = false;
+    bool genericHttp4xx = false;
+    try {
+      sllm.postConstrained({{"user", "hi"}}, toolPayloadFormat({{"shell", nullptr}}));
+    } catch (const GrammarUnsupportedError&) {
+      typed = true;
+    } catch (const std::runtime_error& e) {
+      genericHttp4xx = std::string(e.what()).find("HTTP 400") != std::string::npos;
+    }
+    check(typed,
+          "9/F56: streaming 400 (body in sse.partial) => typed GrammarUnsupportedError");
+    check(!genericHttp4xx,
+          "9/F56: NOT misclassified as generic http-4xx (the pre-fix defect)");
+    streamRefuse.stop();
+  }
+
   eng.stop();
   std::cout << (failures == 0 ? "GRAMMAR PASS\n" : "GRAMMAR FAIL\n");
   return failures == 0 ? 0 : 1;

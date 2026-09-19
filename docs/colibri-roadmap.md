@@ -286,3 +286,48 @@ schema_gbnf.h, family_registry.py, docs/grammar-draft.md) before coding:
   builders, body-capture passing, F46 typed refusal + router
   fallthrough + fail-loud exhaustion, F45 strict parse, solicit
   composition incl. gate-receives-structure and nudge-line emission).
+
+### G2.4-in-runner addendum (F51-F59, live trace wiring)
+
+- **F51 (typed-throw gap, BLOCKER found in audit):** through a router,
+  an all-refusing pool threw plain runtime_error — solicitToolPayload's
+  F46 fallback (catches GrammarUnsupportedError) would never fire and
+  the solicit would crash. Fix: the router's grammar-exhaustion throw IS
+  a GrammarUnsupportedError (derives from runtime_error; existing catch
+  sites unaffected).
+- **F52 (role pinning):** g4-run's poster was Brain-pinned; leaf
+  solicitation would have violated role separation. Fix: role-
+  parameterized RouterPoster; brain turns -> Brain pool, leaf solicits
+  -> Worker pool, separate ledger tags (g4g.brain.* / g4g.leaf.*).
+- **F53 (no-retry law):** solicitToolPayload never loops by design; the
+  runner owns a bounded retry (cap = kMaxNudgeDepth 3) counting format
+  nudges per arm.
+- **F54 (honest measurement):** OLMoE lacks grammar_payload, so the
+  grammar arm runs the F46 fallback on this hardware — the A/B measures
+  strict-parse+nudge quality, NOT grammar acceleration. Summary says so
+  explicitly; grammar_reached_capable_engine reported per run.
+- **F55 (trace tags):** g4g.* run tag keeps ledger deltas separable
+  from g4.* (earlier live) and g4s.* (stub stress) lines.
+- **F56 (streaming 400 body swallowed — product bug, regression-
+  proven):** on the streaming path httplib hands the non-200 body to
+  the SSE content receiver, leaving res->body EMPTY; the F46 substring
+  classification silently degraded to generic http-4xx, breaking the
+  typed fallback in exactly the configuration g4-run uses (stream=
+  true). Fix: classify from sse.partial when streaming + body empty.
+  test-grammar §9 fails against pre-fix code (verified by temporary
+  revert) and passes after.
+- **F57 (nudges must carry information):** retry re-sends the prompt
+  PLUS the strict-parse rejection reason; identical re-sends against a
+  deterministic failure mode would burn the cap with zero information.
+- **F58 (surface-form imitation, live finding):** OLMoE fenced its
+  reply (```json ... ```) on 6/6 attempts when the prompt showed the
+  schema inline in prose, even when told "no fences"; a BARE unfenced
+  example line elicited raw JSON first-try. Strict parse rightly
+  refused the fences (no fence-stripping repair by law) — the prompt
+  must model the wanted surface form. Runner prompt + nudge text fixed
+  accordingly; after the fix: both arms ok=1/1, nudges=0, gate
+  received structured JSON, task verified.
+- **F59 (counter honesty):** gotGrammar counts only SERVED constrained
+  calls (200 through the grammar path), per-arm delta — a refused
+  grammar followed by fallback must never report "grammar reached the
+  engine".

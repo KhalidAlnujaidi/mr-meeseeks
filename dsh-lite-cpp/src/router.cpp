@@ -257,7 +257,11 @@ RoutedResponse ModelRouter::postImpl_(Role role,
     }
   }
   if (grammarRefusals == static_cast<long>(pool.size()))
-    throw std::runtime_error(
+    // F51: typed all the way through — solicitToolPayload's unconstrained
+    // fallback catches GrammarUnsupportedError, and through a router that
+    // refusal surfaces HERE, not as the client throw. Derives from
+    // runtime_error so every existing catch site keeps working.
+    throw GrammarUnsupportedError(
         std::string("router: ") + roleName(role) + " pool exhausted — EVERY entry (" +
         std::to_string(pool.size()) +
         ") refused the response_format grammar (families lack grammar_payload, "
