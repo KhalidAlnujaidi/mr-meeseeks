@@ -77,6 +77,11 @@ endif()
 add_executable(dsh-lite src/main.cpp)
 target_link_libraries(dsh-lite PRIVATE dshlite)
 
+# Gap 4 driver: live uncapped run against a local coli engine (not a ctest
+# member — needs a running engine; invoked manually, ledger to /tmp).
+add_executable(g4-run tests/g4_run.cpp)
+target_link_libraries(g4-run PRIVATE dshlite)
+
 enable_testing()
 foreach(t IN ITEMS sanitizer spawner brain llm router ledger nudge stall)
   add_executable(test-${t} tests/test_${t}.cpp)
