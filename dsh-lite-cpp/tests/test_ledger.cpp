@@ -197,7 +197,10 @@ int main() {
           "F11: non-streaming => ttft -1, not fabricated");
   }
 
-  // ── F12: usage-less stream => zero tokens, honest ──────────────────
+  // ── F33/F35 (supersedes old F12 zero-rule): usage-less stream =>
+  // delta-count ESTIMATE, flagged, prompt tokens 0 — never invented.
+  // Pre-F33 code recorded 0 tokens here; the estimate + provenance flag
+  // is the ratified replacement (docs/colibri-roadmap.md F33 finding).
   {
     SseEngine noUsage;
     noUsage.sendUsage = false;
@@ -210,9 +213,12 @@ int main() {
     c.stream = true;
     LlmClient llm(c);
     LlmResponse r = llm.post(msgs);
-    check(r.content == "01234" && r.usage.completionTokens == 0 &&
-              r.usage.totalTokens == 0 && decodeTokPerSec(r) == 0.0,
-          "F12: no usage chunk => 0 tokens recorded, never invented");
+    check(r.content == "01234" && r.usageEstimated &&
+              r.usage.completionTokens == 5 && r.usage.promptTokens == 0 &&
+              r.usage.totalTokens == 5,
+          "F35: no usage chunk => flagged delta-count estimate, prompt=0");
+    check(r.contentDeltas == 5 && decodeTokPerSec(r) >= 0.0,
+          "F33: estimate feeds tok/s; delta count exposed");
     noUsage.stop();
   }
 

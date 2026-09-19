@@ -58,6 +58,13 @@ struct LlmConfig {
   /// (each received byte restarts the interval). 0 disables: the read
   /// timeout falls back to `timeout` (pre-G2.1 behavior).
   std::chrono::milliseconds stallNoBytesMs{0};
+  /// F33/F34: when streaming, request the OpenAI-standard trailing
+  /// usage chunk (`stream_options.include_usage`). Colibri's gateway
+  /// honors it (openai_server.py:3873/3956); an engine that doesn't
+  /// simply omits the chunk and the client falls back to delta-count
+  /// ESTIMATES (F35: flagged usageEstimated, prompt tokens stay 0 —
+  /// never fabricated).
+  bool requestUsageInStream = true;
 };
 
 /// Colibri family model ids (provenance: colibri c/family_registry.py
@@ -90,6 +97,13 @@ struct LlmResponse {
   /// Largest observed inter-byte silence gap on the wire, ms. -1 when
   /// not measured / fewer than one byte received (streaming only).
   long maxIdleMs = -1;
+  /// F35 provenance: true when usage.completionTokens is a client-side
+  /// delta-count ESTIMATE (engine omitted the usage chunk despite
+  /// include_usage). promptTokens stay 0 in that case — never guessed.
+  bool usageEstimated = false;
+  /// Non-empty content deltas seen on a stream (the estimate's input;
+  /// 0 when not streaming). F36: empty keepalive deltas are NOT counted.
+  long contentDeltas = 0;
 };
 
 /// Stall abort (G2.1/F6): thrown by post() when a streaming request saw

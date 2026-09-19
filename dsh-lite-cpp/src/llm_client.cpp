@@ -98,7 +98,14 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
   body["messages"] = nlohmann::json::array();
   for (const auto& m : messages)
     body["messages"].push_back({{"role", m.role}, {"content", m.content}});
-  if (cfg_.stream) body["stream"] = true;  // SSE: enables ttft measurement
+  if (cfg_.stream) {
+    body["stream"] = true;  // SSE: enables ttft measurement
+    // F34: ask for the engine-authoritative usage chunk. Colibri's
+    // gateway honors this (openai_server.py include_usage); engines
+    // that don't just omit it and the delta-count estimate applies.
+    if (cfg_.requestUsageInStream)
+      body["stream_options"] = {{"include_usage", true}};
+  }
   const std::string payload = body.dump();
 
   httplib::Headers headers;
@@ -123,6 +130,7 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
     long ttftMs = -1;
     long promptTokens = 0, completionTokens = 0, totalTokens = 0;
     bool sawUsage = false;
+    long contentDeltas = 0;  // F33/F36: non-empty content deltas only
     std::string partial;  // SSE line buffer across receive chunks
     std::chrono::steady_clock::time_point t0;
     // Streaming liveness (G2.1/F6): every received chunk stamps lastByte
@@ -157,6 +165,10 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
           sse.ttftMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - sse.t0).count();
         }
         sse.content += piece;
+        // F33/F36: count only NON-EMPTY content deltas — the gateway's
+        // keepalive pings (empty deltas, #597) reset byte-liveness but
+        // must never inflate the token estimate.
+        ++sse.contentDeltas;
       }
     }
     if (j.contains("usage") && j["usage"].is_object() && !j["usage"].is_null()) {
@@ -300,7 +312,16 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
       out.usage.promptTokens = sse.promptTokens;
       out.usage.completionTokens = sse.completionTokens;
       out.usage.totalTokens = sse.totalTokens;
-    }  // else: 0 tokens recorded honestly (F12)
+    } else {
+      // F33/F35: engine omitted the usage chunk (no include_usage
+      // support). Fall back to a delta-count ESTIMATE for completion
+      // tokens — flagged usageEstimated, prompt tokens stay 0 (never
+      // guessed). decodeTokPerSec works off it; totals stay honest.
+      out.usageEstimated = sse.contentDeltas > 0;
+      out.usage.completionTokens = sse.contentDeltas;
+      out.usage.totalTokens = sse.contentDeltas;  // prompt unknown => not added
+    }
+    out.contentDeltas = sse.contentDeltas;
   } else {
     try {
       auto j = nlohmann::json::parse(res->body);

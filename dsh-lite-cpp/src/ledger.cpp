@@ -61,6 +61,7 @@ std::string LedgerWriter::serialize(const LedgerEvent& ev, const std::string& ts
   // F11: ttft null when not measured (non-streaming) — never fabricated.
   cost["ttft_ms"] = (ev.ttftMs >= 0) ? nlohmann::json(ev.ttftMs) : nlohmann::json(nullptr);
   if (ev.tokPerSec > 0.0) cost["tok_per_sec"] = ev.tokPerSec;  // F12: omit on no signal
+  if (ev.tokensEstimated) cost["tokens_estimated"] = true;     // F35 provenance
   j["cost"] = std::move(cost);
 
   if (ev.hasCache) j["cache"] = {{"warm", ev.cacheWarm}};  // F5: best-effort only
@@ -103,6 +104,7 @@ LedgerEvent LedgerWriter::fromRouted(const std::string& type, const std::string&
   ev.completionTokens = r.response.usage.completionTokens;
   ev.latencyMs = r.response.latencyMs;
   ev.ttftMs = r.response.ttftMs;
+  ev.tokensEstimated = r.response.usageEstimated;  // F35: provenance in ledger
   ev.tokPerSec = decodeTokPerSec(r.response);  // F13 decode-window rate
   return ev;
 }

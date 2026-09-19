@@ -38,6 +38,11 @@ struct LedgerEvent {
   long latencyMs = -1;    // < 0 => omitted (no socket measurement)
   long ttftMs = -1;       // < 0 => "ttft_ms": null (non-streaming, F11)
   double tokPerSec = 0.0; // 0.0 => omitted (no velocity signal, F12)
+  /// F35 provenance: true => token counts are client-side delta-count
+  /// estimates (engine omitted the usage chunk). Emitted as
+  /// cost.tokens_estimated ONLY when true — engine-authoritative usage
+  /// needs no flag.
+  bool tokensEstimated = false;
   // route/DENY/nudge specifics
   std::string verdict;    // verify lines: pass|fail
   std::string gate;       // DENY lines: SPAWN|SPLIT|TURN|VELOCITY
