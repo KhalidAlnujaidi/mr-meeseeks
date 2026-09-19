@@ -1,4 +1,9 @@
-// llm_client.cpp — Module 3a: OpenAI-compliant HTTPS client.
+// llm_client.cpp — Module 3a: Colibri-only OpenAI-compliant HTTP client.
+//
+// Target: local `coli serve` (default http://127.0.0.1:8000/v1).
+// body.model is sent VERBATIM — the engine 404s anything but its
+// --model-id. Loopback sends no Authorization header (colibri needs
+// none there unless --api-key is set); non-loopback sends Bearer.
 
 #include "dshlite/llm_client.hpp"
 
@@ -6,7 +11,6 @@
 #include <cstdlib>
 #include <future>
 #include <mutex>
-#include <random>
 #include <stdexcept>
 #include <string>
 
@@ -58,42 +62,14 @@ std::string resolveKey(const LlmConfig& cfg) {
   return {};
 }
 
-// Free-only gate. "auto"/"" => shuffle-pick from kFreeModelPool.
-// Explicit free ids (in pool, or ":free" suffix) pass through.
-// Loopback hosts (unit-test stubs) bypass so tests can assert shape
-// with synthetic model names. Anything else (paid id on a real host)
-// falls back to a random free model — never spend.
 bool isLoopback(const std::string& host) {
   return host == "127.0.0.1" || host == "localhost" || host == "::1";
-}
-
-bool isFreeId(const std::string& id) {
-  if (id.size() >= 5 && id.compare(id.size() - 5, 5, ":free") == 0)
-    return true;
-  for (const auto& m : kFreeModelPool)
-    if (m == id) return true;
-  return false;
-}
-
-std::string pickFreeModel() {
-  thread_local std::mt19937 rng{std::random_device{}()};
-  std::uniform_int_distribution<std::size_t> d(0, kFreeModelPool.size() - 1);
-  return kFreeModelPool[d(rng)];
-}
-
-std::string resolveModel(const LlmConfig& cfg, const std::string& host) {
-  if (isLoopback(host)) return cfg.model.empty() ? "unit-test-model" : cfg.model;
-  if (cfg.model.empty() || cfg.model == "auto") return pickFreeModel();
-  if (isFreeId(cfg.model)) return cfg.model;
-  return pickFreeModel();  // paid id rejected: free fallback, never spend
 }
 
 }  // namespace
 
 namespace detail {
-std::string resolveModelForHost(const LlmConfig& cfg, const std::string& host) {
-  return resolveModel(cfg, host);
-}
+bool isLoopbackHost(const std::string& host) { return isLoopback(host); }
 }  // namespace detail
 
 LlmClient::LlmClient(LlmConfig cfg) : cfg_(std::move(cfg)) {}
@@ -104,24 +80,28 @@ std::future<LlmResponse> LlmClient::postAsync(
 }
 
 LlmResponse LlmClient::post(const std::vector<Message>& messages) {
-  const std::string key = resolveKey(cfg_);
-  if (key.empty()) {
-    throw std::runtime_error("llm: missing API key (env " + cfg_.apiKeyEnv +
-                             " unset and no explicit key configured)");
-  }
   const SplitUrl u = splitUrl(cfg_.endpoint);
-  const std::string model = resolveModel(cfg_, u.host);  // free-only gate
+  const bool loopback = isLoopback(u.host);
+  // Loopback engines need no key; non-loopback binds require one.
+  const std::string key = resolveKey(cfg_);
+  if (!loopback && key.empty()) {
+    throw std::runtime_error("llm: non-loopback endpoint needs an API key (env " +
+                             cfg_.apiKeyEnv + " or explicit cfg.apiKey)");
+  }
+  if (cfg_.model.empty()) {
+    throw std::runtime_error("llm: cfg.model must equal the engine --model-id");
+  }
 
   nlohmann::json body;
-  body["model"] = model;
-  // Reasoning free models return EMPTY content when starved of tokens.
+  body["model"] = cfg_.model;  // verbatim: engine 404s anything else
   body["max_tokens"] = cfg_.maxTokens > 0 ? cfg_.maxTokens : 1024;
   body["messages"] = nlohmann::json::array();
   for (const auto& m : messages)
     body["messages"].push_back({{"role", m.role}, {"content", m.content}});
   const std::string payload = body.dump();
 
-  httplib::Headers headers = {{"Authorization", "Bearer " + key}};
+  httplib::Headers headers;
+  if (!key.empty()) headers.emplace("Authorization", "Bearer " + key);
   const auto secs = cfg_.timeout.count() / 1000;
   const auto usecs = (cfg_.timeout.count() % 1000) * 1000;
 
@@ -145,11 +125,15 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
   if (!res) {
     throw std::runtime_error("llm: transport failure posting to " + u.host +
                              " (httplib error " +
-                             std::to_string(static_cast<int>(res.error())) + ")");
+                             std::to_string(static_cast<int>(res.error())) +
+                             ") — is `coli serve` running?");
   }
   if (res->status != 200) {
+    std::string hint = (res->status == 404)
+                           ? " (model_not_found: cfg.model != engine --model-id?)"
+                           : "";
     throw std::runtime_error("llm: HTTP " + std::to_string(res->status) +
-                             " from " + u.host + ": " +
+                             " from " + u.host + hint + ": " +
                              res->body.substr(0, 500));
   }
 

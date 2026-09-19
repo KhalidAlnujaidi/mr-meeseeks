@@ -28,9 +28,11 @@ Each SRS requirement, where it lives, and which test proves it.
 
 | SRS clause | Implementation | Test |
 |---|---|---|
-| Async HTTPS POST, OpenAI-compliant, TLS | src/llm_client.cpp (httplib::SSLClient + OpenSSL; http:// Client shares the same payload/parse/accounting path) | test_llm 1 (payload shape), 4 (async future); live path for TLS handshake |
+| Async HTTP POST, OpenAI-compliant, local engine | src/llm_client.cpp (httplib Client on http:// loopback; SSLClient + OpenSSL only when endpoint is https) | test_llm 1 (verbatim model-id payload), 4 (async future); live path needs `coli serve` |
+| Verbatim --model-id (engine 404s anything else) | body["model"] = cfg.model, empty refused | test_llm 2b (404 mismatch), 5c (empty refused) |
+| Loopback needs no key; non-loopback requires one | isLoopback() key gate | test_llm 5 (no-key loopback), 5b (remote refused) |
 | Strict token tracking | totalUsage()/requestCount() | test_llm 1-3 (parse, accumulate, zero-usage) |
-| Error paths: missing key, non-200, malformed JSON, bad scheme | resolveKey/splitUrl/parse guards | test_llm 5-8 |
+| Error paths: non-200, malformed JSON, bad scheme | status/parse/splitUrl guards | test_llm 6-8 |
 | vector<Message> roles system/user/assistant | include/dshlite/llm_client.hpp + brain.cpp | test_brain 1 |
 | Judge hook before delegation | makeNodeJudgeHook (node harness/loop.ts judge in isolated worker) | test_brain 2 + live probe (act:do_direct, conf 0.8) |
 | Judge timeout => escalate, never unverified/locked | fallback() in brain.cpp | test_brain 3-5 + live no-key probe (escalate) |

@@ -1,9 +1,10 @@
-// main.cpp — dsh-lite demo: Brain turn (needs OPENROUTER_API_KEY) or
-// offline path (sanitizer + spawner + judge-gate demo with a stubbed LLM).
+// main.cpp — dsh-lite demo: Brain turn against a local `coli serve`
+// engine, or offline path (sanitizer + spawner + judge-gate stub).
 //
 // Usage:
+//   coli serve --model <weights> --model-id glm-5.3-flash-colibri &
 //   dsh-lite "your strategic question"   # live Brain turn + judge gate
-//   dsh-lite --offline                   # no network: spawner + gate demo
+//   dsh-lite --offline                   # no engine: spawner + gate demo
 
 #include <cstdlib>
 #include <iostream>
@@ -28,9 +29,15 @@ struct EchoLlm : dshlite::ILlmPoster {
 
 int main(int argc, char** argv) {
   std::string arg = argc > 1 ? argv[1] : "";
-  if (arg == "--offline" || std::getenv("OPENROUTER_API_KEY") == nullptr) {
-    if (arg != "--offline")
-      std::cout << "(no OPENROUTER_API_KEY: running offline demo)\n";
+  dshlite::LlmConfig probe;
+  const bool engineWanted = (arg != "--offline");
+  if (arg == "--offline") {
+    std::cout << "(offline demo requested: no engine traffic)\n";
+  } else if (arg.empty()) {
+    arg = "--offline";
+    std::cout << "(no question given: running offline demo)\n";
+  }
+  if (arg == "--offline") {
     // Spawner demo: hostile output sanitized before the Brain sees it.
     dshlite::SwarmSpawner sp;
     dshlite::SpawnOptions o;
@@ -60,9 +67,13 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  // Live path: Brain + OpenRouter + node judge hook.
+  // Live path: Brain + local colibri engine + node judge hook.
+  // No API key needed on loopback; COLI_API_KEY only for remote binds.
+  (void)engineWanted;
+  (void)probe;
   try {
-    dshlite::LlmConfig cfg;
+    dshlite::LlmConfig cfg;  // defaults: 127.0.0.1:8000 + engine model-id
+    if (const char* m = std::getenv("COLI_MODEL_ID")) cfg.model = m;
     dshlite::LlmClient llm(cfg);
     dshlite::BrainLoop brain(llm, dshlite::makeNodeJudgeHook());
     brain.setSystemPrompt(

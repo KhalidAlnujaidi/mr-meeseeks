@@ -22,7 +22,7 @@ struct SpawnOptions {
   std::vector<std::string> argv;  ///< exact argv; argv[0] is the binary
   std::vector<std::string> scopeFiles;  ///< host paths symlinked into workspace
   /// The ONLY environment the child receives (KEY -> VALUE). Empty by
-  /// default: pass TYPESAFE_API_KEY / OPENROUTER_API_KEY here only when
+  /// default: pass COLI_API_KEY / TYPESAFE_API_KEY here only when
   /// the task explicitly requires it.
   std::map<std::string, std::string> allowedEnv;
   std::chrono::milliseconds timeout{60000};  ///< watchdog SIGKILL deadline

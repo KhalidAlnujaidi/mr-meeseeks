@@ -41,14 +41,14 @@ int main() {
   // 2. Scrubbed env: hostile parent env NEVER leaks.
   {
     ::setenv("MEESEEKS_HOST_SECRET", "super-secret-parent-token", 1);
-    ::setenv("OPENROUTER_API_KEY", "sk-or-host-key-must-not-leak", 1);
+    ::setenv("COLI_API_KEY", "sk-colibri-host-key-must-not-leak", 1);
     SpawnOptions o;
     o.argv = {"env"};  // prints its whole environment
     o.timeout = std::chrono::seconds(10);
     SpawnResult r = sp.spawn(o);
     check(r.sanitizedStdout.find("MEESEEKS_HOST_SECRET") == std::string::npos,
           "parent secret not in child env");
-    check(r.sanitizedStdout.find("sk-or-host-key") == std::string::npos,
+    check(r.sanitizedStdout.find("sk-colibri-host-key") == std::string::npos,
           "host API key not in child env");
     check(r.sanitizedStdout.find("PATH=") == std::string::npos,
           "host PATH not inherited");

@@ -1,14 +1,13 @@
-// test_llm.cpp — Milestone 3 acceptance: OpenAI-compliant POST shape,
-// response ingestion, strict token accumulation, async path, error paths.
-// Transport is loopback-only via an in-process httplib stub server:
-// no network, no keys, no TLS certs (http:// exercises the same
-// payload/parse/accounting code as the https:// production path).
+// test_llm.cpp — Milestone 3 acceptance: Colibri POST shape, response
+// ingestion, strict token accumulation, async path, error paths.
+// Transport is loopback-only via an in-process httplib stub server that
+// mimics `coli serve`: no engine, no keys, no TLS (http:// exercises the
+// same payload/parse/accounting code as the production path).
 
 #include <atomic>
 #include <chrono>
 #include <functional>
 #include <iostream>
-#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -44,15 +43,25 @@ int main() {
   using namespace dshlite;
 
   httplib::Server srv;
-  srv.Post("/ok", [](const httplib::Request& req, httplib::Response& res) {
-    g_lastBody = req.body;
-    g_lastAuth = req.get_header_value("Authorization");
-    res.set_content(
-        R"({"choices":[{"message":{"content":"hello brain"}}],)"
-        R"("usage":{"prompt_tokens":10,"completion_tokens":5,)"
-        R"("total_tokens":15}})",
-        "application/json");
-  });
+  // Colibri-faithful stub: 404 unless body.model matches the served id.
+  const std::string kServedId = "glm-5.3-flash-colibri";
+  srv.Post("/v1/chat/completions",
+           [&](const httplib::Request& req, httplib::Response& res) {
+             g_lastBody = req.body;
+             g_lastAuth = req.get_header_value("Authorization");
+             if (req.body.find("\"" + kServedId + "\"") == std::string::npos) {
+               res.status = 404;
+               res.set_content(R"({"error":{"message":"The model `x` does not exist.",)"
+                               R"("type":"model_not_found"}})",
+                               "application/json");
+               return;
+             }
+             res.set_content(
+                 R"({"choices":[{"message":{"content":"hello brain"}}],)"
+                 R"("usage":{"prompt_tokens":10,"completion_tokens":5,)"
+                 R"("total_tokens":15}})",
+                 "application/json");
+           });
   srv.Post("/no_usage", [](const httplib::Request&, httplib::Response& res) {
     res.set_content(R"({"choices":[{"message":{"content":"nou"}}]})",
                     "application/json");
@@ -68,10 +77,6 @@ int main() {
   // Bind a free loopback port: try 18080..18100.
   int port = -1;
   for (int p = 18080; p < 18100; ++p) {
-    // Probe by attempting a throwaway bind via the server itself is racy;
-    // instead just try listen in a thread and check is_running. Simpler:
-    // attempt sequential listen with invalid=false trick: httplib has no
-    // try-bind, so use a raw socket probe.
     httplib::Server probe;
     if (!probe.bind_to_port("127.0.0.1", p)) continue;  // already in use
     port = p;
@@ -101,8 +106,9 @@ int main() {
   auto cfgFor = [&](const std::string& path) {
     LlmConfig c;
     c.endpoint = "http://127.0.0.1:" + std::to_string(port) + path;
-    c.apiKey = "test-key";
-    c.model = "unit-test-model";
+    c.apiKey.clear();  // loopback colibri needs no key
+    c.apiKeyEnv = "DSHLITE_DEFINITELY_UNSET_ENV_VAR_XYZ";
+    c.model = kServedId;
     c.timeout = std::chrono::seconds(5);
     return c;
   };
@@ -111,18 +117,18 @@ int main() {
 
   // 1. Happy path: content + usage parsed, request shape correct.
   {
-    LlmClient llm(cfgFor("/ok"));
+    LlmClient llm(cfgFor("/v1/chat/completions"));
     LlmResponse r = llm.post(msgs);
     check(r.content == "hello brain", "content ingested");
     check(r.usage.promptTokens == 10 && r.usage.completionTokens == 5 &&
               r.usage.totalTokens == 15,
           "usage block parsed");
-    check(g_lastAuth == "Bearer test-key", "Authorization Bearer sent");
-    check(g_lastBody.find("\"unit-test-model\"") != std::string::npos &&
+    check(g_lastAuth.empty(), "no Authorization on loopback (colibri needs none)");
+    check(g_lastBody.find("\"" + kServedId + "\"") != std::string::npos &&
               g_lastBody.find("\"system\"") != std::string::npos &&
               g_lastBody.find("\"user\"") != std::string::npos &&
               g_lastBody.find("\"max_tokens\"") != std::string::npos,
-          "OpenAI-compliant payload (model + roles + max_tokens)");
+          "colibri payload (verbatim model-id + roles + max_tokens)");
     check(llm.requestCount() == 1, "requestCount == 1");
     const auto t = llm.totalUsage();
     check(t.promptTokens == 10 && t.completionTokens == 5 && t.totalTokens == 15,
@@ -137,6 +143,15 @@ int main() {
           "token totals accumulate (strict tracking)");
   }
 
+  // 2b. Wrong model-id => engine 404 model_not_found surfaces.
+  {
+    LlmConfig c = cfgFor("/v1/chat/completions");
+    c.model = "not-the-served-id";
+    LlmClient llm(c);
+    check(throwsWith([&] { llm.post(msgs); }, "404"),
+          "model-id mismatch surfaces 404 (set cfg.model = --model-id)");
+  }
+
   // 3. Missing usage block => zero usage, still counts the request.
   {
     LlmClient llm(cfgFor("/no_usage"));
@@ -148,7 +163,7 @@ int main() {
 
   // 4. Async path: future valid immediately, same result on get().
   {
-    LlmClient llm(cfgFor("/ok"));
+    LlmClient llm(cfgFor("/v1/chat/completions"));
     auto fut = llm.postAsync(msgs);
     check(fut.valid(), "postAsync returns a live future (non-blocking)");
     LlmResponse r = fut.get();
@@ -160,7 +175,7 @@ int main() {
   // stay exact (data-race free) and requestCount == N.
   {
     constexpr int kFanout = 8;
-    LlmClient llm(cfgFor("/ok"));
+    LlmClient llm(cfgFor("/v1/chat/completions"));
     std::vector<std::future<LlmResponse>> futs;
     for (int i = 0; i < kFanout; ++i) futs.push_back(llm.postAsync(msgs));
     for (auto& f : futs) f.get();
@@ -172,15 +187,30 @@ int main() {
           "concurrent async totals exact, no lost updates");
   }
 
-  // 5. Missing key => throws, no request counted.
+  // 5. Loopback needs NO key: empty key + unset env still posts.
   {
-    LlmConfig c = cfgFor("/ok");
-    c.apiKey.clear();
-    c.apiKeyEnv = "DSHLITE_DEFINITELY_UNSET_ENV_VAR_XYZ";
+    LlmClient llm(cfgFor("/v1/chat/completions"));
+    LlmResponse r = llm.post(msgs);
+    check(r.content == "hello brain", "loopback posts without any key");
+  }
+
+  // 5b. Non-loopback without key => throws before any socket.
+  {
+    LlmConfig c = cfgFor("/v1/chat/completions");
+    c.endpoint = "http://192.0.2.1:8000/v1/chat/completions";  // TEST-NET-1
     LlmClient llm(c);
-    check(throwsWith([&] { llm.post(msgs); }, "missing API key"),
-          "missing key throws");
-    check(llm.requestCount() == 0, "failed call not counted");
+    check(throwsWith([&] { llm.post(msgs); }, "needs an API key"),
+          "non-loopback without key refused");
+    check(llm.requestCount() == 0, "refused call not counted");
+  }
+
+  // 5c. Empty model => throws (engine would 404; fail fast instead).
+  {
+    LlmConfig c = cfgFor("/v1/chat/completions");
+    c.model.clear();
+    LlmClient llm(c);
+    check(throwsWith([&] { llm.post(msgs); }, "--model-id"),
+          "empty model refused with --model-id hint");
   }
 
   // 6. Non-200 => throws with status.
@@ -199,38 +229,25 @@ int main() {
 
   // 8. Bad scheme => throws before any socket.
   {
-    LlmConfig c = cfgFor("/ok");
+    LlmConfig c = cfgFor("/v1/chat/completions");
     c.endpoint = "ftp://127.0.0.1/x";
     LlmClient llm(c);
     check(throwsWith([&] { llm.post(msgs); }, "must start with"),
           "bad scheme rejected");
   }
 
-  // 9. Free-only gate on REAL hosts (via detail::resolveModelForHost):
-  // "auto" shuffles within the verified free pool, explicit free ids
-  // pass, paid ids fall back to free (never spend). Loopback keeps
-  // synthetic names (proven by block 1 above).
+  // 9. Loopback helper: 127.0.0.1/localhost/::1 need no key,
+  // real hosts do. Colibri ids are documentation, not a gate —
+  // any --model-id the engine serves is accepted verbatim.
   {
-    using dshlite::detail::resolveModelForHost;
-    dshlite::LlmConfig c;
-    c.apiKey = "x";
-    c.model = "auto";
-    std::set<std::string> seen;
-    for (int i = 0; i < 20; ++i)
-      seen.insert(resolveModelForHost(c, "openrouter.ai"));
-    bool allFree = !seen.empty();
-    for (const auto& m : seen)
-      if (m.size() < 5 || m.compare(m.size() - 5, 5, ":free") != 0)
-        allFree = false;
-    check(allFree && seen.size() > 1, "auto shuffles across free pool");
-    c.model = "nex-agi/nex-n2.5-pro:free";
-    check(resolveModelForHost(c, "openrouter.ai") ==
-              "nex-agi/nex-n2.5-pro:free",
-          "explicit free id passes");
-    c.model = "openai/gpt-5-paid";
-    std::string fb = resolveModelForHost(c, "openrouter.ai");
-    check(fb.size() >= 5 && fb.compare(fb.size() - 5, 5, ":free") == 0,
-          "paid id rejected -> free fallback (never spend)");
+    using dshlite::detail::isLoopbackHost;
+    check(isLoopbackHost("127.0.0.1") && isLoopbackHost("localhost") &&
+              isLoopbackHost("::1") && !isLoopbackHost("example.com") &&
+              !isLoopbackHost("192.168.1.10"),
+          "loopback helper exact (local no-key, remote keyed)");
+    check(!dshlite::kColibriModelIds.empty() &&
+              dshlite::kColibriModelIds[0] == "glm-5.3-flash-colibri",
+          "colibri id roster present (docs, not a gate)");
   }
 
   srv.stop();

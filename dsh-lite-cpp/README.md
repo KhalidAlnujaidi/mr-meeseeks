@@ -12,20 +12,21 @@ src/sanitizer.cpp               (printable ASCII + TAB/LF/CR only, ANSI stripped
 include/dshlite/spawner.hpp     Module 2: Swarm spawner contract
 src/spawner.cpp                 (fork/execve, scrubbed env, /tmp/meeseeks_<uuid>/,
                                  CLOEXEC pipes, 60 s watchdog SIGKILL, exit 124 on timeout)
-include/dshlite/llm_client.hpp  Module 3a: OpenAI-compliant HTTPS client
-src/llm_client.cpp              (cpp-httplib + OpenSSL, sync + async POST, strict token totals)
+include/dshlite/llm_client.hpp  Module 3a: Colibri-only HTTP client
+src/llm_client.cpp              (cpp-httplib + OpenSSL, sync + async POST,
+                                 verbatim --model-id, strict token totals)
 include/dshlite/brain.hpp       Module 3b: Executive Iteration Loop
 src/brain.cpp                   (vector<Message> history, judge hook BEFORE delegation,
                                  judge timeout/failure => escalate to user, never unverified)
 src/main.cpp                    dsh-lite demo binary
 tests/test_{sanitizer,spawner,brain,llm}.cpp   milestone acceptance suites
 tests/bench_sanitizer.cpp       10 MB / 15 ms perf gate
-tests/test_llm.cpp uses an in-process loopback stub server (no network,
-no keys, no TLS certs): it proves the OpenAI-compliant payload shape,
-response ingestion, strict token accumulation, the async path, and the
-missing-key / non-200 / malformed-JSON / bad-scheme error paths. The
-TLS handshake itself is provided by OpenSSL via httplib::SSLClient and
-is exercised only on the live path (./build/dsh-lite "question").
+tests/test_llm.cpp uses an in-process loopback stub server that mimics
+`coli serve` (404 unless body.model matches the served id; no keys, no
+TLS): it proves the verbatim model-id payload, response ingestion,
+strict token accumulation, the async path, the 404 model-id mismatch,
+and the key/scheme/JSON error paths. A live engine is exercised only
+via ./build/dsh-lite "question" with `coli serve` running.
 
 ## Deps (SRS stack)
 
@@ -38,8 +39,11 @@ fallback second; OpenSSL via Homebrew openssl@3 on macOS.
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j8
 ctest --test-dir build --output-on-failure
-./build/dsh-lite --offline        # no network demo
-./build/dsh-lite "your question"  # live: needs OPENROUTER_API_KEY
+./build/dsh-lite --offline        # no engine demo
+# live (Colibri-only): start the engine first, then ask:
+#   coli serve --model <weights> --model-id glm-5.3-flash-colibri &
+#   ./build/dsh-lite "your question"            # loopback, no key needed
+#   COLI_MODEL_ID=inkling-colibri ./build/dsh-lite "your question"
 
 ASan/UBSan (macOS note: LeakSanitizer is unsupported on this platform —
 omit ASAN_OPTIONS=detect_leaks=1, which aborts every binary at startup):

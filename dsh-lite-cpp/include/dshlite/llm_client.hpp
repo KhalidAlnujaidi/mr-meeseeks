@@ -1,10 +1,18 @@
 #pragma once
 // llm_client.hpp — Module 3a: Executive LLM client (SRS Milestone 3).
 //
-// Non-blocking HTTPS POST to OpenAI-compliant endpoints (OpenRouter
-// default) via cpp-httplib + OpenSSL. Strict token tracking: every
-// response's usage block accumulates into totalUsage()/requestCount().
-// Network layer only — BrainLoop owns the Message state array.
+// Colibri-only. POSTs OpenAI-compliant chat completions to a local
+// `coli serve` engine (default http://127.0.0.1:8000/v1/chat/completions)
+// via cpp-httplib (+ OpenSSL when the endpoint is https). Strict token
+// tracking: every response's usage block accumulates into
+// totalUsage()/requestCount(). Network layer only — BrainLoop owns the
+// Message state array.
+//
+// Model policy: the engine answers 404 unless body.model equals its
+// --model-id, so the client sends cfg.model VERBATIM (default
+// "glm-5.3-flash-colibri", the smallest colibri family default). No
+// shuffle, no fallback, no remote providers — the harness holds its
+// own engine, it never rents intelligence behind an API.
 
 #include <chrono>
 #include <future>
@@ -26,36 +34,32 @@ struct TokenUsage {
 };
 
 struct LlmConfig {
-  std::string endpoint = "https://openrouter.ai/api/v1/chat/completions";
-  std::string apiKeyEnv = "OPENROUTER_API_KEY";
-  /// "auto" (default) = shuffle-pick a verified free model per call.
-  /// Explicit ids MUST be free (end in ":free" or in kFreeModelPool);
-  /// a paid id on a real endpoint falls back to a random free model.
-  /// Loopback endpoints (127.0.0.1/localhost, i.e. unit tests) bypass
-  /// the free-only gate so stub servers can assert payload shape.
-  std::string model = "auto";
-  int maxTokens = 1024;  ///< reasoning free models need room (>= 400)
+  std::string endpoint = "http://127.0.0.1:8000/v1/chat/completions";
+  /// Bearer key for non-loopback binds. Loopback needs none (colibri
+  /// serves 127.0.0.1 without auth unless --api-key is set). Env var
+  /// wins when set; explicit apiKey is the fallback (tests).
+  std::string apiKeyEnv = "COLI_API_KEY";
+  /// Sent VERBATIM as body.model. Must equal the engine's --model-id
+  /// (else HTTP 404 model_not_found). Default: smallest colibri family.
+  std::string model = "glm-5.3-flash-colibri";
+  int maxTokens = 1024;
   std::chrono::milliseconds timeout{60000};
-  std::string apiKey;  ///< explicit key (tests); env var wins when set
+  std::string apiKey;
 };
 
-/// Verified free-only pool (provenance: scripts/or-swarm FREE_MODELS,
-/// verified=True live 2026-09-17, cost 0). Never add a paid id here.
-inline const std::vector<std::string> kFreeModelPool = {
-    "nex-agi/nex-n2.5-pro:free",
-    "nex-agi/nex-n2.5-mini:free",
-    "cohere/north-mini-code:free",
-    "dots-studio/dots-3-note-preview:free",
-    "inclusionai/ling-3.0-flash-vl:free",
-    "inclusionai/ling-3.0-flash-sante:free",
+/// Colibri family model ids (provenance: colibri c/family_registry.py
+/// default_model_id per family). Any --model-id the engine serves is
+/// accepted — this list is documentation, NOT a gate.
+inline const std::vector<std::string> kColibriModelIds = {
+    "glm-5.3-flash-colibri",  "glm-5.2-colibri",       "inkling-colibri",
+    "kimi-k3-colibri",        "olmoe-colibri",         "qwen3.6-colibri",
+    "qwen3.8-flash-next-colibri", "deepseek-v4-colibri",
+    "deepseek-v4.1-flash-colibri",
 };
 
 namespace detail {
-// Free-only model resolution, exposed for unit tests.
-// "auto"/"" => shuffle-pick from kFreeModelPool. Explicit free ids pass.
-// Loopback hosts (unit-test stubs) bypass so tests assert payload shape.
-// Paid ids on real hosts fall back to a random free model — never spend.
-std::string resolveModelForHost(const LlmConfig& cfg, const std::string& host);
+// Loopback check, exposed for unit tests: loopback engines need no key.
+bool isLoopbackHost(const std::string& host);
 }  // namespace detail
 
 struct LlmResponse {
@@ -75,8 +79,10 @@ class LlmClient : public ILlmPoster {
  public:
   explicit LlmClient(LlmConfig cfg);
 
-  /// Synchronous POST. Throws std::runtime_error on missing key,
-  /// transport failure, non-200 status, or malformed JSON.
+  /// Synchronous POST. No key is sent on loopback (local `coli serve`
+  /// needs none unless --api-key is set). Throws std::runtime_error on
+  /// transport failure, non-200 status (incl. 404 model_not_found when
+  /// cfg.model != engine --model-id), or malformed JSON.
   LlmResponse post(const std::vector<Message>& messages) override;
 
   /// Non-blocking POST; exceptions surface on future::get().
