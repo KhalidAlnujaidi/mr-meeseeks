@@ -148,10 +148,165 @@ void BrainLoop::setSystemPrompt(const std::string& s) {
 }
 
 std::string BrainLoop::turn(const std::string& userInput) {
+  // F29: an explicit user turn resets nudgeDepth on EVERY lineage —
+  // but NEVER retry rounds (per-task I6 budget is not launderable).
+  for (auto& kv : nudgeStates_) recordUserTurn(kv.second);
+  // F28: append the user message FIRST — compaction protects the LAST
+  // user message, which must already be this input when it runs.
   history_.push_back(Message{"user", userInput});
+  // G2.5: compact before the model ever sees the re-injected history.
+  compactHistory(history_, host_.compaction);
   LlmResponse r = llm_.post(history_);
   history_.push_back(Message{"assistant", r.content});
   return r.content;
+}
+
+NudgeState& BrainLoop::nudgeState(const std::string& taskId) {
+  auto it = nudgeStates_.find(taskId);
+  if (it != nudgeStates_.end()) return it->second;
+  NudgeState s;
+  s.taskId = taskId;
+  return nudgeStates_.emplace(taskId, std::move(s)).first->second;
+}
+
+void BrainLoop::emit(const LedgerEvent& ev) {
+  if (host_.ledger) host_.ledger->append(ev);  // F32: null ledger = no-op
+}
+
+BrainLoop::TaskReport BrainLoop::runGatedTask(const std::string& taskId,
+                                              const nlohmann::json& payload,
+                                              const SpawnOptions& opt,
+                                              RetryPlanner planner) {
+  TaskReport rep;
+  rep.taskId = taskId;
+  NudgeState& st = nudgeState(taskId);
+  nlohmann::json current = payload;
+  const RetryScope defaultScope = RetryScope::FullScope;
+
+  while (true) {
+    // G2.4 step 1: pre-execution gate BEFORE any spawn (call-site law).
+    GateVerdict gv;
+    try {
+      gv = checkPayload(current, host_.policy);
+    } catch (const std::exception& e) {  // F30: never crash the brain loop
+      rep.disposition = "gate-refused";
+      rep.gate.allowed = false;
+      rep.gate.code = "GATE_EXCEPTION";
+      rep.gate.message = e.what();
+      LedgerEvent ev;
+      ev.type = "DENY"; ev.taskId = taskId; ev.role = "worker";
+      ev.gate = "SPAWN"; ev.code = "GATE_EXCEPTION"; ev.detail = e.what();
+      emit(ev);
+      return rep;
+    }
+    rep.gate = gv;
+
+    if (!gv.allowed) {  // step 2: refuse + DENY line, never spawn
+      rep.disposition = "gate-refused";
+      LedgerEvent ev;
+      ev.type = "DENY"; ev.taskId = taskId; ev.role = "worker";
+      ev.gate = "SPAWN"; ev.code = gv.code; ev.detail = gv.message;
+      emit(ev);
+      return rep;
+    }
+    if (!autoExecutable(gv)) {  // step 3: DESTRUCTIVE => propose-only
+      rep.disposition = "propose-only";
+      LedgerEvent ev;
+      ev.type = "report"; ev.taskId = taskId; ev.role = "worker";
+      ev.verdict = "propose-only"; ev.detail = gv.code + ": " + gv.message;
+      emit(ev);
+      return rep;
+    }
+
+    // step 4: gated payload may spawn. F31: opt.allowedEnv is used
+    // verbatim — this loop never adds keys.
+    SpawnResult sr;
+    try {
+      SwarmSpawner spawner;
+      sr = spawner.spawn(opt);
+    } catch (const std::exception& e) {
+      rep.disposition = "spawn-error";
+      LedgerEvent ev;
+      ev.type = "report"; ev.taskId = taskId; ev.role = "worker";
+      ev.verdict = "spawn-error"; ev.detail = e.what();
+      emit(ev);
+      return rep;
+    }
+    ++rep.spawns;
+
+    // G2.6: local exit-code verification (sycophancy-immune, F9).
+    rep.verify = verifyViaSpawn(sr);
+    SwarmSpawner::cleanup(sr.workspaceDir);
+    LedgerEvent vv;
+    vv.type = "verify"; vv.taskId = taskId; vv.role = "reviewer";
+    vv.verdict = rep.verify.pass ? "pass" : "fail";
+    vv.detail = "exit=" + std::to_string(rep.verify.exitCode) +
+                (rep.verify.timedOut ? " timedOut=true" : "") + " " +
+                rep.verify.detail;
+    emit(vv);
+
+    if (rep.verify.pass) {
+      rep.disposition = "verified";
+      return rep;
+    }
+
+    // Verification failed: I6 retry budget via the state machine.
+    nlohmann::json nextPayload = current;
+    RetryScope scope = defaultScope;
+    if (planner) scope = planner(st.rounds, nextPayload);
+    const RetryVerdict rv = recordRetry(st, scope);
+    if (rv == RetryVerdict::StopAndReport) {
+      rep.disposition = st.rounds > kMaxRoundsPerTask ? "verify-failed-stop"
+                                                      : "stop-report";
+      st.stopped = true;  // latched: lineage terminal until a NEW task id
+      LedgerEvent ev;
+      ev.type = "report"; ev.taskId = taskId; ev.role = "worker";
+      ev.verdict = "fail";
+      ev.detail = "I6 cap: rounds " + std::to_string(st.rounds) +
+                  " — stop+report, no full-scope retry (doctrine 5)";
+      emit(ev);
+      return rep;
+    }
+    if (rv == RetryVerdict::MustNarrowOrReroute) {
+      // rounds == kMaxRoundsPerTask and the planner declared FullScope:
+      // a 3rd full-scope retry is REFUSED (I6). This loop cannot narrow
+      // on its own — stop+report and latch the lineage. A planner that
+      // WANTS to continue must declare NarrowOrReroute (recordRetry
+      // then Allows at rounds=3); anything past that is StopAndReport.
+      rep.disposition = "verify-failed-stop";
+      st.stopped = true;
+      LedgerEvent ev;
+      ev.type = "report"; ev.taskId = taskId; ev.role = "worker";
+      ev.verdict = "fail";
+      ev.detail = "I6 cap: " + std::to_string(st.rounds) + "/" +
+                  std::to_string(kMaxRoundsPerTask) +
+                  " rounds — 3rd full-scope retry refused; narrow the task "
+                  "or re-route to a different model family (doctrine 5)";
+      emit(ev);
+      return rep;
+    }
+
+    // Allowed retry: count a nudge (I7) — the 4th chained continuation
+    // is refused by construction (G2.2).
+    try {
+      recordNudge(st, "retry-after-verify-fail");
+    } catch (const std::logic_error& e) {
+      rep.disposition = "stop-report";
+      LedgerEvent ev;
+      ev.type = "nudge"; ev.taskId = taskId; ev.role = "worker";
+      ev.nudgeDepth = st.nudgeDepth;
+      ev.detail = std::string("NUDGE refused: ") + e.what();
+      emit(ev);
+      return rep;
+    }
+    LedgerEvent ev;
+    ev.type = "nudge"; ev.taskId = taskId; ev.role = "worker";
+    ev.nudgeDepth = st.nudgeDepth;
+    ev.detail = "retry " + std::to_string(st.rounds) + "/" +
+                std::to_string(kMaxRoundsPerTask) + " after verify-fail";
+    emit(ev);
+    current = std::move(nextPayload);
+  }
 }
 
 JudgeVerdict BrainLoop::gateDelegation(const std::string& criterion) {
