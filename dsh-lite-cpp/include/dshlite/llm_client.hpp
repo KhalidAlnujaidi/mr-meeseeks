@@ -17,6 +17,7 @@
 #include <chrono>
 #include <future>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -45,6 +46,18 @@ struct LlmConfig {
   int maxTokens = 1024;
   std::chrono::milliseconds timeout{60000};
   std::string apiKey;
+  /// SSE streaming (roadmap G3.1/F11): enables time-to-first-token
+  /// measurement. Non-streaming responses report ttftMs = -1 — ttft is
+  /// never fabricated when the whole body arrives at once.
+  bool stream = false;
+  /// Streaming liveness stall interval (roadmap G2.1/F6): with
+  /// stream=true, abort the request when ZERO bytes arrive on the wire
+  /// for this long. This is a no-bytes interval, NOT a wall-clock cap —
+  /// a slow-but-alive 0.05 tok/s engine that keeps dripping bytes is
+  /// never stalled. Implemented as the httplib per-recv read timeout
+  /// (each received byte restarts the interval). 0 disables: the read
+  /// timeout falls back to `timeout` (pre-G2.1 behavior).
+  std::chrono::milliseconds stallNoBytesMs{0};
 };
 
 /// Colibri family model ids (provenance: colibri c/family_registry.py
@@ -66,7 +79,43 @@ struct LlmResponse {
   std::string content;
   TokenUsage usage;
   long latencyMs = 0;
+  /// Time to first streamed content token, ms. -1 when not measured
+  /// (non-streaming call, or a stream that produced no content).
+  long ttftMs = -1;
+  /// Streaming liveness (G2.1/F6): ms from request start to the LAST
+  /// byte received on the wire. -1 when not measured (non-streaming, or
+  /// no bytes ever arrived). Lets the router/host separate slow-but-
+  /// alive from stalled WITHOUT relying on wall-clock alone.
+  long lastByteMs = -1;
+  /// Largest observed inter-byte silence gap on the wire, ms. -1 when
+  /// not measured / fewer than one byte received (streaming only).
+  long maxIdleMs = -1;
 };
+
+/// Stall abort (G2.1/F6): thrown by post() when a streaming request saw
+/// ZERO bytes on the wire for cfg.stallNoBytesMs. Distinct type so the
+/// router classifies the attempt as "stall-no-bytes" and falls through
+/// to the next WORKER family — never the brain pool (F2). what() always
+/// contains the literal marker "stall-no-bytes" plus the cap, the
+/// measured silence, and the recovery (fail-loud house rule).
+struct LlmStallError : std::runtime_error {
+  LlmStallError(const std::string& msg, long silentMsIn, long lastByteMsIn,
+                long bytesSeenIn)
+      : std::runtime_error(msg),
+        silentMs(silentMsIn),
+        lastByteMs(lastByteMsIn),
+        bytesSeen(bytesSeenIn) {}
+  long silentMs;    ///< measured no-bytes interval that tripped the cap
+  long lastByteMs;  ///< last wire byte, ms into stream (-1 = none ever)
+  long bytesSeen;   ///< total wire chunks received before the stall
+};
+
+/// Decode velocity (roadmap G3.1/F13): completion tokens over DECODE
+/// wall time (latency - ttft when streaming, full latency otherwise —
+/// prefill/TTFT is disk-bound warmup, not decode). Returns 0.0 when
+/// completionTokens is 0 (an empty completion is not a velocity signal,
+/// F12) or the decode window is non-positive.
+double decodeTokPerSec(const LlmResponse& r);
 
 /// Transport seam: BrainLoop depends on this, tests inject fakes.
 class ILlmPoster {

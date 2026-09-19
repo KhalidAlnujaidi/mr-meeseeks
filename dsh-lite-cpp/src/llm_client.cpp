@@ -98,40 +98,186 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
   body["messages"] = nlohmann::json::array();
   for (const auto& m : messages)
     body["messages"].push_back({{"role", m.role}, {"content", m.content}});
+  if (cfg_.stream) body["stream"] = true;  // SSE: enables ttft measurement
   const std::string payload = body.dump();
 
   httplib::Headers headers;
   if (!key.empty()) headers.emplace("Authorization", "Bearer " + key);
   const auto secs = cfg_.timeout.count() / 1000;
   const auto usecs = (cfg_.timeout.count() % 1000) * 1000;
+  // G2.1/F6: on the streaming path with a stall interval configured, the
+  // READ timeout becomes the no-bytes liveness interval (httplib re-arms
+  // select() on every recv, so dripping bytes keep it alive — wall clock
+  // is NOT the stall signal). Connect/write keep the outer watchdog.
+  const bool stallArmed = cfg_.stream && cfg_.stallNoBytesMs.count() > 0;
+  const auto readMs = stallArmed ? cfg_.stallNoBytesMs.count() : cfg_.timeout.count();
+  const auto readSecs = readMs / 1000;
+  const auto readUsecs = (readMs % 1000) * 1000;
+
+  // SSE receive state (streaming path, F11): content deltas concatenate;
+  // ttft = first delta carrying non-empty content; a `usage` chunk (sent
+  // last by OpenAI-compatible engines) fills token totals. A stream with
+  // no usage block records 0 tokens honestly (F12) — never invented.
+  struct SseState {
+    std::string content;
+    long ttftMs = -1;
+    long promptTokens = 0, completionTokens = 0, totalTokens = 0;
+    bool sawUsage = false;
+    std::string partial;  // SSE line buffer across receive chunks
+    std::chrono::steady_clock::time_point t0;
+    // Streaming liveness (G2.1/F6): every received chunk stamps lastByte
+    // and updates the largest observed inter-byte silence gap. The stall
+    // SIGNAL is the no-bytes interval (read timeout = stallNoBytesMs),
+    // never wall clock — these timestamps are the EVIDENCE the router
+    // uses to tell slow-but-alive from stalled.
+    std::chrono::steady_clock::time_point lastByte;
+    bool sawByte = false;
+    long lastByteMs = -1;   // last byte, ms into stream (-1 = none)
+    long maxIdleMs = -1;    // largest inter-byte gap (-1 = <1 byte)
+    long chunks = 0;        // wire chunks received
+  };
+  SseState sse;
+  sse.t0 = std::chrono::steady_clock::now();
+
+  // One SSE `data:` line: parse the delta JSON.
+  auto handleSseData = [&sse](const std::string& data) {
+    if (data == "[DONE]") return;
+    nlohmann::json j;
+    try {
+      j = nlohmann::json::parse(data);
+    } catch (const std::exception&) {
+      return;  // malformed keepalive/partial frame: skip, never throw mid-stream
+    }
+    if (j.contains("choices") && j["choices"].is_array() && !j["choices"].empty()) {
+      const auto& d = j["choices"][0].value("delta", nlohmann::json::object());
+      const std::string piece = d.value("content", std::string());
+      if (!piece.empty()) {
+        if (sse.ttftMs < 0) {
+          auto now = std::chrono::steady_clock::now();
+          sse.ttftMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - sse.t0).count();
+        }
+        sse.content += piece;
+      }
+    }
+    if (j.contains("usage") && j["usage"].is_object() && !j["usage"].is_null()) {
+      const auto& w = j["usage"];
+      sse.promptTokens = w.value("prompt_tokens", 0L);
+      sse.completionTokens = w.value("completion_tokens", 0L);
+      sse.totalTokens = w.value("total_tokens", sse.promptTokens + sse.completionTokens);
+      sse.sawUsage = true;
+    }
+  };
+  auto handleSseChunk = [&sse, &handleSseData](const char* data, size_t len,
+                                               uint64_t /*offset*/,
+                                               uint64_t /*total*/) {
+    // G2.1/F6 liveness: ANY wire byte (content delta, keepalive, usage)
+    // restarts the stall interval and is recorded as evidence.
+    auto now = std::chrono::steady_clock::now();
+    if (sse.sawByte) {
+      const long gap = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           now - sse.lastByte)
+                           .count();
+      if (gap > sse.maxIdleMs) sse.maxIdleMs = gap;
+    } else {
+      sse.sawByte = true;
+      sse.maxIdleMs = 0;
+    }
+    sse.lastByte = now;
+    sse.lastByteMs =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - sse.t0)
+            .count();
+    ++sse.chunks;
+    sse.partial.append(data, len);
+    size_t pos;
+    while ((pos = sse.partial.find('\n')) != std::string::npos) {
+      std::string line = sse.partial.substr(0, pos);
+      sse.partial.erase(0, pos + 1);
+      while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+      if (line.rfind("data:", 0) == 0) {
+        std::string payloadLine = line.substr(5);
+        while (!payloadLine.empty() && payloadLine.front() == ' ') payloadLine.erase(0, 1);
+        handleSseData(payloadLine);
+      }
+    }
+    return true;  // keep receiving
+  };
 
   auto t0 = std::chrono::steady_clock::now();
   httplib::Result res;
   if (u.https) {
     httplib::SSLClient cli(u.host, u.port);
     cli.set_connection_timeout(secs, usecs);
-    cli.set_read_timeout(secs, usecs);
+    cli.set_read_timeout(readSecs, readUsecs);
     cli.set_write_timeout(secs, usecs);
-    res = cli.Post(u.path.c_str(), headers, payload, "application/json");
+    if (cfg_.stream) {
+      // httplib has no Post(..., receiver): build the Request and send()
+      // it with content_receiver attached (SSE lands chunk-by-chunk).
+      httplib::Request req;
+      req.method = "POST";
+      req.path = u.path;
+      req.headers = headers;
+      req.set_header("Content-Type", "application/json");
+      req.body = payload;
+      req.content_receiver = handleSseChunk;
+      res = cli.send(req);
+    } else {
+      res = cli.Post(u.path.c_str(), headers, payload, "application/json");
+    }
   } else {
     httplib::Client cli(u.host, u.port);
     cli.set_connection_timeout(secs, usecs);
-    cli.set_read_timeout(secs, usecs);
+    cli.set_read_timeout(readSecs, readUsecs);
     cli.set_write_timeout(secs, usecs);
-    res = cli.Post(u.path.c_str(), headers, payload, "application/json");
+    if (cfg_.stream) {
+      httplib::Request req;
+      req.method = "POST";
+      req.path = u.path;
+      req.headers = headers;
+      req.set_header("Content-Type", "application/json");
+      req.body = payload;
+      req.content_receiver = handleSseChunk;
+      res = cli.send(req);
+    } else {
+      res = cli.Post(u.path.c_str(), headers, payload, "application/json");
+    }
   }
   auto t1 = std::chrono::steady_clock::now();
 
   if (!res) {
+    // G2.1/F6: with the stall interval armed, a read timeout on the
+    // stream means "zero bytes on the wire for stallNoBytesMs" — a
+    // STALL, not a generic transport failure. Evidence check (F16):
+    // httplib reports Error::Read for both silence-timeouts and early
+    // EOF, so the last-byte timestamp decides — only silence at/above
+    // ~90% of the cap classifies as stall-no-bytes; an early EOF right
+    // after traffic stays a transport failure (honest classification).
+    if (stallArmed && res.error() == httplib::Error::Read) {
+      const auto now = std::chrono::steady_clock::now();
+      const long silentMs =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              now - (sse.sawByte ? sse.lastByte : sse.t0))
+              .count();
+      if (silentMs * 10 >= cfg_.stallNoBytesMs.count() * 9) {
+        std::string msg =
+            "llm: stall-no-bytes — zero wire bytes for " +
+            std::to_string(silentMs) + "ms >= stallNoBytesMs=" +
+            std::to_string(cfg_.stallNoBytesMs.count()) + " from " + u.host +
+            " (last byte at " + std::to_string(sse.lastByteMs) +
+            "ms into stream, " + std::to_string(sse.chunks) +
+            " chunks seen) — request aborted cleanly; recovery: router "
+              "falls through to the next worker family, never the brain (F2)";
+        throw LlmStallError(msg, silentMs, sse.lastByteMs, sse.chunks);
+      }
+    }
     throw std::runtime_error("llm: transport failure posting to " + u.host +
                              " (httplib error " +
                              std::to_string(static_cast<int>(res.error())) +
                              ") — is `coli serve` running?");
   }
   if (res->status != 200) {
-    std::string hint = (res->status == 404)
-                           ? " (model_not_found: cfg.model != engine --model-id?)"
-                           : "";
+    const std::string hint = (res->status == 404)
+                                 ? " (model_not_found: cfg.model != engine --model-id?)"
+                                 : "";
     throw std::runtime_error("llm: HTTP " + std::to_string(res->status) +
                              " from " + u.host + hint + ": " +
                              res->body.substr(0, 500));
@@ -140,19 +286,36 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
   LlmResponse out;
   out.latencyMs = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0)
                       .count();
-  try {
-    auto j = nlohmann::json::parse(res->body);
-    out.content = j.at("choices").at(0).at("message").at("content").get<std::string>();
-    if (j.contains("usage") && j["usage"].is_object()) {
-      const auto& w = j["usage"];
-      out.usage.promptTokens = w.value("prompt_tokens", 0L);
-      out.usage.completionTokens = w.value("completion_tokens", 0L);
-      out.usage.totalTokens = w.value("total_tokens",
-                                      out.usage.promptTokens + out.usage.completionTokens);
+  if (cfg_.stream) {
+    // Flush any trailing unterminated `data:` line.
+    if (!sse.partial.empty() && sse.partial.rfind("data:", 0) == 0)
+      handleSseData(sse.partial.substr(5));
+    out.content = std::move(sse.content);
+    out.ttftMs = sse.ttftMs;
+    // G2.1/F6 liveness evidence for the router/host: slow-but-alive vs
+    // stalled is decidable from these without wall-clock guesswork.
+    out.lastByteMs = sse.lastByteMs;
+    out.maxIdleMs = sse.maxIdleMs;
+    if (sse.sawUsage) {
+      out.usage.promptTokens = sse.promptTokens;
+      out.usage.completionTokens = sse.completionTokens;
+      out.usage.totalTokens = sse.totalTokens;
+    }  // else: 0 tokens recorded honestly (F12)
+  } else {
+    try {
+      auto j = nlohmann::json::parse(res->body);
+      out.content = j.at("choices").at(0).at("message").at("content").get<std::string>();
+      if (j.contains("usage") && j["usage"].is_object()) {
+        const auto& w = j["usage"];
+        out.usage.promptTokens = w.value("prompt_tokens", 0L);
+        out.usage.completionTokens = w.value("completion_tokens", 0L);
+        out.usage.totalTokens = w.value("total_tokens",
+                                        out.usage.promptTokens + out.usage.completionTokens);
+      }
+    } catch (const std::exception& e) {
+      throw std::runtime_error(std::string("llm: malformed JSON response: ") +
+                               e.what());
     }
-  } catch (const std::exception& e) {
-    throw std::runtime_error(std::string("llm: malformed JSON response: ") +
-                             e.what());
   }
 
   // Strict token tracking: every successful response accumulates.
@@ -165,6 +328,20 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
     ++requests_;
   }
   return out;
+}
+
+double decodeTokPerSec(const LlmResponse& r) {
+  if (r.usage.completionTokens <= 0) return 0.0;  // F12: no signal, no rate
+  // Decode wall = total latency minus prefill (ttft) when measured (F13).
+  // ttft >= latency is a degenerate window => no decode evidence => 0.0.
+  long decodeMs = r.latencyMs;
+  if (r.ttftMs >= 0) {
+    if (r.ttftMs >= r.latencyMs) return 0.0;
+    decodeMs = r.latencyMs - r.ttftMs;
+  }
+  if (decodeMs <= 0) return 0.0;
+  return static_cast<double>(r.usage.completionTokens) * 1000.0 /
+         static_cast<double>(decodeMs);
 }
 
 }  // namespace dshlite
