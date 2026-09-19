@@ -15,11 +15,40 @@ src/spawner.cpp                 (fork/execve, scrubbed env, /tmp/meeseeks_<uuid>
 include/dshlite/llm_client.hpp  Module 3a: Colibri-only HTTP client
 src/llm_client.cpp              (cpp-httplib + OpenSSL, sync + async POST,
                                  verbatim --model-id, strict token totals)
+include/dshlite/router.hpp      Module 3c: Multi-Engine Local Router (Gap 1)
+src/router.cpp                  (role -> ordered (endpoint, model-id) pools,
+                                 worker->worker fallback — never to the brain,
+                                 <2-family pool warnings, isolated probe,
+                                 thread-safe pooled dispatch, G3.2 velocity
+                                 floor with per-entry warmup exemption)
+include/dshlite/ledger.hpp      Module 4: ledger.jsonl v2 emitter (Gap 3/4)
+src/ledger.cpp                  (mutex + single write(2) per line (F15),
+                                 ttft null when unmeasured (F11), detail
+                                 always sanitized via Module 1, host-stamped
+                                 UTC ts; fromRouted() fills cost block with
+                                 decode-window tok/s (F13))
 include/dshlite/brain.hpp       Module 3b: Executive Iteration Loop
 src/brain.cpp                   (vector<Message> history, judge hook BEFORE delegation,
                                  judge timeout/failure => escalate to user, never unverified)
+include/dshlite/nudge.hpp       Gap 2: nudge-depth + retry-cap state machine
+src/nudge.cpp                   (G2.2 caps verbatim from harness/loop.ts:
+                                 maxNudgeDepth=3 reset on user turn,
+                                 MAX_ROUNDS_PER_TASK=2 then narrow/reroute/stop;
+                                 G2.3 repeat-loop detection; G2.6 local
+                                 verifyViaSpawn exit-code judge, F9 key scrub)
+include/dshlite/payload_gate.hpp Gap 2: pre-execution payload gate (G2.4/F7)
+src/payload_gate.cpp            (schema -> allowlist -> destructive word-boundary
+                                 scan; DESTRUCTIVE_PROPOSE_ONLY never auto-spawns;
+                                 enforceGateBeforeSpawn sequenced BEFORE
+                                 SwarmSpawner::spawn — spawner stays dumb)
+include/dshlite/compaction.hpp  Gap 2: history compaction + result vectors
+src/compaction.cpp              (G2.5/F1: std::vector<Message>, 8192/4096/1024
+                                 thresholds, protected system+final+last-user,
+                                 [HOST COMPACTION] marker with reserved budget;
+                                 E.2.3 result vector, BUS_VALUE_TOO_LARGE refuse-
+                                 never-truncate; all text via Module 1 sanitizer)
 src/main.cpp                    dsh-lite demo binary
-tests/test_{sanitizer,spawner,brain,llm}.cpp   milestone acceptance suites
+tests/test_{sanitizer,spawner,brain,llm,router,ledger,nudge,stall}.cpp   milestone acceptance suites
 tests/bench_sanitizer.cpp       10 MB / 15 ms perf gate
 tests/test_llm.cpp uses an in-process loopback stub server that mimics
 `coli serve` (404 unless body.model matches the served id; no keys, no

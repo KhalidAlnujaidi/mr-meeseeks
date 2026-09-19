@@ -41,6 +41,10 @@ add_library(dshlite STATIC
   src/spawner.cpp
   src/llm_client.cpp
   src/router.cpp
+  src/ledger.cpp
+  src/nudge.cpp
+  src/payload_gate.cpp
+  src/compaction.cpp
   src/brain.cpp)
 target_include_directories(dshlite PUBLIC include)
 target_compile_options(dshlite PRIVATE -Wall -Wextra -Werror)
@@ -74,7 +78,7 @@ add_executable(dsh-lite src/main.cpp)
 target_link_libraries(dsh-lite PRIVATE dshlite)
 
 enable_testing()
-foreach(t IN ITEMS sanitizer spawner brain llm router stall)
+foreach(t IN ITEMS sanitizer spawner brain llm router ledger nudge stall)
   add_executable(test-${t} tests/test_${t}.cpp)
   target_link_libraries(test-${t} PRIVATE dshlite)
   add_test(NAME test-${t} COMMAND test-${t})
