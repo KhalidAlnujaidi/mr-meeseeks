@@ -8,6 +8,17 @@
  * stub cost buys each point of all-k reliability. bfcl-micro carries no cost
  * model, so its section reports accuracy + latency only.
  *
+ * VALIDITY CAVEAT (tau-retail only): pass^1, pass^3 and the derived
+ * cost-per-reliability-point are NON-DISCRIMINATING between conditions. The
+ * stub worker's pass draw is treatment-independent by construction (the
+ * condition label is not a hash input — see stubPass in tau-run.ts), so these
+ * numbers are the same draw re-reported per condition and carry no treatment
+ * signal. They are still printed for schema continuity, each flagged inline.
+ * Valid cross-condition metrics: orch latency, turns, atomic-vs-split verdict,
+ * jev_source_dist, fallback semantics, estimated cost. bfcl-micro accuracy IS
+ * meaningful — it is a real local router checked against fixed expected tools,
+ * not a stub draw.
+ *
  * Rule: reads the given JSONL, never touches harness/ledger.jsonl. The input
  * path itself should be scratch (/tmp/bench-*); anything else gets a warning
  * on stderr but still reads (reporter never writes prod state).
@@ -65,8 +76,15 @@ function tauSection(s: TauSummary): string[] {
   const topoStr = Object.keys(topo).sort().map((k) => `${k}=${topo[k]}`).join(", ") || "n/a";
   L.push("");
   L.push(`- tasks=${s.n_tasks ?? "n/a"} k=${s.k ?? "n/a"} models=${s.model_worker ?? "?"} / ${s.model_reviewer ?? "?"} prompt=${s.prompt_digest ?? "?"} daemon_configured=${s.daemon_configured ?? "n/a"}`);
-  L.push(`- pass^1=${f3(s.pass1)} pass^3=${f3(s.pass3)} mean_turns=${f2(s.mean_turns)}`);
-  L.push(`- $/task=${usd(s.cost_per_task_usd)} **cost-per-reliability-point=${cprp === null ? "n/a (pass^3 = 0)" : `$${cprp.toExponential(2)}/pt`}**`);
+  // NON-DISCRIMINATING: pass^1/pass^3 come from the stub worker's
+  // treatment-independent draw (the condition label is not a hash input — see
+  // stubPass in tau-run.ts), so these numbers are near-identical across
+  // conditions and carry NO treatment signal. They are reported for schema
+  // continuity and must not be read as accuracy results or compared across
+  // conditions. The same caveat applies to cost-per-reliability-point, which is
+  // derived entirely from pass^3.
+  L.push(`- pass^1=${f3(s.pass1)} pass^3=${f3(s.pass3)} mean_turns=${f2(s.mean_turns)} *(non-discriminating: stub draw is treatment-independent — not accuracy)*`);
+  L.push(`- $/task=${usd(s.cost_per_task_usd)} cost-per-reliability-point=${cprp === null ? "n/a (pass^3 = 0)" : `$${cprp.toExponential(2)}/pt`} *(derived from pass^3, therefore also non-discriminating)*`);
   L.push(`- orch_latency p50=${s.orch_p50_ms ?? "n/a"}ms p95=${s.orch_p95_ms ?? "n/a"}ms fallback_rate=${f2(s.fallback_rate)}`);
   L.push(`- topology: ${topoStr}`);
   // Condition J only: Jev atomicity provenance + cost. Emitted solely when the

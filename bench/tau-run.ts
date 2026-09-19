@@ -23,19 +23,37 @@
  *      Per task it records jev_source ("jev" = real Noul answer, "v2c" =
  *      local fallback) plus the Jev atomic-check latency and confidence, so
  *      J-vs-A can be compared on the same tasks with the same stub leaves.
+ *   K  Jev atomicity + LOCAL topology — the confound isolator. J's atomicity
+ *      is EXACTLY J's (checkAtomicityNoul at JEV_DEFAULT_TIMEOUT_MS, falling
+ *      through to isAtomicV2C), but topology is forced to FALLBACK_TOPOLOGY
+ *      with NO network call: chooseTopology() is never invoked. J calls
+ *      chooseTopology() unconditionally, so A-vs-J moved atomicity AND
+ *      topology at once and could attribute nothing to atomicity. J-vs-K
+ *      moves atomicity alone. Same TYPESAFE_API_KEY gate and the same three
+ *      jev_* fields / summary aggregates as J, so the pair is directly
+ *      comparable; K's orch_latency_ms therefore reflects the atomicity
+ *      attempt only.
  *
  * Frozen pins: MODEL_WORKER / MODEL_REVIEWER labels + PROMPT_DIGEST (frozen
  * LEAF_HEADER + ROLE_PROMPTS text recorded on summary lines for provenance —
  * labels only, never called). Prompt digest is sha1 of that frozen text.
  *
- * Metrics per run line: pass (stub verdict), turns (1 atomic / 3 split),
+ * Metrics per run line: pass (stub verdict — TREATMENT-INDEPENDENT by
+ * construction, see stubPass: identical across conditions per task+repeat, so
+ * it is NOT an accuracy discriminator), turns (1 atomic / 3 split),
  * cost_usd (estimated: stub tokens x stub price — a placeholder scale, not
  * a bill), orch_latency_ms (atomicity+topology decision time only).
  * Condition J adds: jev_source ("jev" | "v2c"), jev_confidence,
- * jev_atomic_latency_ms (the atomic-check round-trip alone).
- * Summary per condition: pass^1 (mean), pass^3 (all-k pass), mean turns,
- * $/task, orch p50/p95, fallback rate, topology distribution; J also adds
- * jev_source_dist, mean_jev_atomic_latency_ms, mean_jev_confidence.
+ * jev_atomic_latency_ms (the atomic-check round-trip alone). Condition K
+ * carries the identical per-row jev_* fields and summary aggregates.
+ * Summary per condition: pass^1 (mean), pass^3 (all-k pass) — both derived
+ * from the same treatment-independent draw and therefore NOT valid for
+ * comparing conditions — plus mean turns, $/task, orch p50/p95, fallback
+ * rate, topology distribution; J and K also add jev_source_dist,
+ * mean_jev_atomic_latency_ms, mean_jev_confidence.
+ * VALID discriminators between conditions in this stub benchmark: orch
+ * latency, turns, the atomic-vs-split verdict, jev_source_dist, fallback
+ * semantics, estimated cost.
  *
  * Rules: --out MUST be under /tmp/ (default timestamped /tmp/bench-tau-*).
  * Never reads/writes harness/ledger.jsonl, harness/tasks/, harness/queue/.
@@ -43,7 +61,8 @@
  *
  * Usage: node bench/tau-run.ts [--k 3] [--conditions B,C] [--out /tmp/x.jsonl]
  *        TYPESAFE_API_KEY=... node bench/tau-run.ts --conditions A,J
- *        TYPESAFE_API_KEY=... node bench/tau-run.ts --conditions A,B,C,J --k 3
+ *        TYPESAFE_API_KEY=... node bench/tau-run.ts --conditions A,J,K --k 3
+ *        TYPESAFE_API_KEY=... node bench/tau-run.ts --conditions A,B,C,J,K --k 3
  *
  * Erasable-syntax TS only: runs directly with `node` (>=22.18). Zero deps.
  */
@@ -91,10 +110,21 @@ export const TASKS: BenchTask[] = [
   { id: "tau-s2", role: "engineer", criterion: "Render the order confirmation email", expectPass: true },
 ];
 
-export type Condition = "A" | "B" | "C" | "J";
+export type Condition = "A" | "B" | "C" | "J" | "K";
 
 /** Conditions whose atomicity verdict is gated behind TYPESAFE_API_KEY. */
-const KEYED_CONDITIONS: Condition[] = ["A", "J"];
+const KEYED_CONDITIONS: Condition[] = ["A", "J", "K"];
+
+/**
+ * Conditions whose atomicity path is Jev-backed: they call
+ * checkAtomicityNoul() at JEV_DEFAULT_TIMEOUT_MS and carry the jev_* fields
+ * plus the Jev summary aggregates. J and K differ ONLY in topology source
+ * (J: chooseTopology(); K: forced local FALLBACK_TOPOLOGY, no network).
+ */
+const JEV_ATOMIC_CONDITIONS: Condition[] = ["J", "K"];
+
+/** Conditions whose topology is the local fallback — never a network call. */
+const LOCAL_TOPOLOGY_CONDITIONS: Condition[] = ["K"];
 
 export interface RunLine {
   bench: "tau-retail"; condition: Condition; task_id: string; repeat: number;
@@ -123,10 +153,31 @@ export interface SummaryLine {
   mean_jev_confidence?: number;
 }
 
-/** Deterministic stub verdict: hash(task + repeat + condition) -> pass unless expectPass=false forces fail. */
-function stubPass(task: BenchTask, repeat: number, cond: Condition): boolean {
+/**
+ * Deterministic stub verdict: hash(task + repeat) -> pass unless
+ * expectPass=false forces fail. Same threshold semantics as before
+ * (h[0] >= 26, ~90% pass for expectPass tasks). Deterministic and
+ * reproducible across runs — NOT real randomness.
+ *
+ * The draw is TREATMENT-INDEPENDENT BY CONSTRUCTION: the condition label is
+ * deliberately NOT a hash input. The leaves are stubs, so a stub worker's
+ * success cannot actually depend on which atomicity/topology path orchestrated
+ * it; hashing the label would only manufacture pass^k differences between
+ * conditions out of the string "J" != "K". An earlier revision hashed
+ * `${task.id}:${repeat}:${cond}`, which made pass a function of the condition's
+ * NAME and silently invalidated every cross-condition accuracy comparison.
+ *
+ * Consequence, stated plainly: for a given task+repeat the draw is now IDENTICAL
+ * across A/B/C/J/K. accuracy / pass^1 / pass^3 are therefore NOT a valid
+ * discriminator between conditions in this stub benchmark — they measure only
+ * this deterministic draw, and raw pass differences between conditions must not
+ * be reported as an accuracy result. What the benchmark CAN discriminate is the
+ * real orchestration path: orch latency, turns, the atomic-vs-split verdict,
+ * jev_source_dist, fallback semantics, and estimated cost.
+ */
+function stubPass(task: BenchTask, repeat: number): boolean {
   if (!task.expectPass) return false;
-  const h = createHash("sha1").update(`${task.id}:${repeat}:${cond}`).digest();
+  const h = createHash("sha1").update(`${task.id}:${repeat}`).digest();
   return h[0] >= 26; // ~90% pass for expectPass tasks (deterministic jitter)
 }
 
@@ -162,8 +213,8 @@ function parseArgs(argv: string[]): { k: number; conditions: Condition[]; out: s
     if (argv[i] === "--k") { k = Number(argv[++i]); if (!Number.isInteger(k) || k < 1 || k > 9) throw new Error("--k must be an integer 1..9"); }
     else if (argv[i] === "--conditions") {
       const cs = (argv[++i] ?? "").split(",").map((s) => s.trim().toUpperCase());
-      const valid = (c: string): c is Condition => c === "A" || c === "B" || c === "C" || c === "J";
-      if (cs.length === 0 || !cs.every(valid)) throw new Error("--conditions must be a subset of A,B,C,J");
+      const valid = (c: string): c is Condition => c === "A" || c === "B" || c === "C" || c === "J" || c === "K";
+      if (cs.length === 0 || !cs.every(valid)) throw new Error("--conditions must be a subset of A,B,C,J,K");
       conditions = cs;
     }
     else if (argv[i] === "--out") { out = requireScratchOut(argv[++i] ?? ""); }
@@ -190,7 +241,7 @@ function restoreDaemonEnv(saved: Record<string, string | undefined>): void {
 
 async function runCondition(cond: Condition, k: number, emit: (o: unknown) => void): Promise<SummaryLine> {
   const ts0 = new Date().toISOString();
-  // Keyed-condition gate (A + J): stubbed behind TYPESAFE_API_KEY presence.
+  // Keyed-condition gate (A + J + K): stubbed behind TYPESAFE_API_KEY presence.
   if (KEYED_CONDITIONS.includes(cond) && !process.env["TYPESAFE_API_KEY"]) {
     console.log(`condition ${cond} skipped: TYPESAFE_API_KEY absent (Jev-backed condition, nothing to run)`);
     const skip: SummaryLine = {
@@ -228,10 +279,11 @@ async function runCondition(cond: Condition, k: number, emit: (o: unknown) => vo
       for (let r = 1; r <= k; r++) {
         const t0 = Date.now();
         // Atomicity: A = harness default (isAtomicAsync — LOCAL-ONLY since
-        // 3c591c8: always v2c, no Jev call); J = calibrated Jev called
+        // 3c591c8: always v2c, no Jev call); J and K = calibrated Jev called
         // DIRECTLY at the generous JEV_DEFAULT_TIMEOUT_MS (bypasses
-        // isAtomicAsync, bench-level variant only); B/C = forced local v2c
-        // (isAtomicV2C), Jev never consulted.
+        // isAtomicAsync, bench-level variant only; the atomicity path is
+        // IDENTICAL for the two, so J-vs-K isolates topology); B/C = forced
+        // local v2c (isAtomicV2C), Jev never consulted.
         let atomic: boolean;
         let atomicSource: "jev" | "v2c";
         let atomicFallback: boolean;
@@ -241,10 +293,10 @@ async function runCondition(cond: Condition, k: number, emit: (o: unknown) => vo
           const a = await isAtomicAsync(task.criterion);
           atomic = a.atomic; atomicSource = a.source;
           atomicFallback = a.source === "v2c"; // Jev-first fell back to local
-        } else if (cond === "J") {
-          // checkAtomicityNoul default is JEV_ATOMIC_BUDGET_MS (150ms), which
-          // the measured ~935ms round-trip cannot meet — pass the generous
-          // non-critical-path budget explicitly, exactly as loop.ts documents.
+        } else if (JEV_ATOMIC_CONDITIONS.includes(cond)) {
+          // J and K share this branch verbatim: checkAtomicityNoul with the
+          // generous non-critical-path budget, falling through to local v2c.
+          // Same construction as before for J — behavior unchanged.
           const j = await checkAtomicityNoul(task.criterion, { timeoutMs: JEV_DEFAULT_TIMEOUT_MS });
           atomicSource = j.fallback ? "v2c" : "jev";
           // Fallback verdict is local v2c — same answer the harness hot path
@@ -257,8 +309,14 @@ async function runCondition(cond: Condition, k: number, emit: (o: unknown) => vo
           atomic = isAtomicV2C(task.criterion);
           atomicSource = "v2c"; atomicFallback = true; // Jev-OFF by design
         }
-        // Topology:Je v Choice when key allows, else strict-validated fallback.
-        const topo = await chooseTopology(task.criterion);
+        // Topology: Jev Choice when key allows, else strict-validated
+        // fallback. K FORCES the local path and never calls chooseTopology()
+        // — no network, so K's orch_latency_ms measures the atomicity
+        // attempt alone and J-vs-K isolates atomicity from topology.
+        const topo: { topology: Topology; fallback?: true } =
+          LOCAL_TOPOLOGY_CONDITIONS.includes(cond)
+            ? { topology: FALLBACK_TOPOLOGY, fallback: true as const }
+            : await chooseTopology(task.criterion);
         const orchMs = Date.now() - t0;
         orchLat.push(orchMs);
         const fb = atomicFallback || !!topo.fallback;
@@ -275,13 +333,15 @@ async function runCondition(cond: Condition, k: number, emit: (o: unknown) => vo
           daemonReached = verdict !== null;
         }
 
-        const pass = stubPass(task, r, cond);
+        // Treatment-independent by construction (see stubPass): the condition
+        // label is not an input, so A/B/C/J/K agree per task+repeat.
+        const pass = stubPass(task, r);
         const turns = atomic ? 1 : 3; // split path: claim + 2 children + verify
         const cost = ((STUB_INPUT_TOKENS + STUB_OUTPUT_TOKENS) / 1000) * STUB_PRICE_PER_1K_USD;
         totalTurns += turns;
         totalCost += cost;
         perTaskPass[task.id]!.push(pass);
-        if (cond === "J") {
+        if (JEV_ATOMIC_CONDITIONS.includes(cond)) {
           jevSum += jevAtomicLatencyMs ?? 0;
           jevConfSum += jevConfidence ?? 0;
           jevSrcDist[atomicSource] = (jevSrcDist[atomicSource] ?? 0) + 1;
@@ -293,8 +353,8 @@ async function runCondition(cond: Condition, k: number, emit: (o: unknown) => vo
           topology_fallback: !!topo.fallback, daemon_configured: daemonConfigured(),
           daemon_reached: daemonReached, turns, pass, cost_usd: cost,
           orch_latency_ms: orchMs, ts: new Date().toISOString(),
-          // J-only fields: absent on A/B/C rows, so their shape is unchanged.
-          ...(cond === "J" ? {
+          // J/K-only fields: absent on A/B/C rows, so their shape is unchanged.
+          ...(JEV_ATOMIC_CONDITIONS.includes(cond) ? {
             jev_source: atomicSource, jev_confidence: jevConfidence ?? 0,
             jev_atomic_latency_ms: jevAtomicLatencyMs ?? 0,
           } : {}),
@@ -315,8 +375,8 @@ async function runCondition(cond: Condition, k: number, emit: (o: unknown) => vo
       fallback_rate: fallbacks / n, topology_dist: topoDist,
       model_worker: MODEL_WORKER, model_reviewer: MODEL_REVIEWER,
       prompt_digest: PROMPT_DIGEST, daemon_configured: daemonConfigured(), ts: new Date().toISOString(),
-      // J-only fields: absent on A/B/C summaries.
-      ...(cond === "J" ? {
+      // J/K-only fields: absent on A/B/C summaries.
+      ...(JEV_ATOMIC_CONDITIONS.includes(cond) ? {
         jev_source_dist: jevSrcDist,
         mean_jev_atomic_latency_ms: jevSum / n,
         mean_jev_confidence: jevConfSum / n,
@@ -332,7 +392,7 @@ async function runCondition(cond: Condition, k: number, emit: (o: unknown) => vo
 
 function usage(): never {
   console.error("usage: node bench/tau-run.ts [--k 3] [--conditions B,C] [--out /tmp/bench-tau.jsonl]");
-  console.error("  --conditions: subset of A,B,C,J (A and J additionally require TYPESAFE_API_KEY)");
+  console.error("  --conditions: subset of A,B,C,J,K (A, J and K additionally require TYPESAFE_API_KEY)");
   process.exit(1);
 }
 
