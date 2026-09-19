@@ -28,10 +28,35 @@ struct TokenUsage {
 struct LlmConfig {
   std::string endpoint = "https://openrouter.ai/api/v1/chat/completions";
   std::string apiKeyEnv = "OPENROUTER_API_KEY";
-  std::string model = "deepseek/deepseek-chat";
+  /// "auto" (default) = shuffle-pick a verified free model per call.
+  /// Explicit ids MUST be free (end in ":free" or in kFreeModelPool);
+  /// a paid id on a real endpoint falls back to a random free model.
+  /// Loopback endpoints (127.0.0.1/localhost, i.e. unit tests) bypass
+  /// the free-only gate so stub servers can assert payload shape.
+  std::string model = "auto";
+  int maxTokens = 1024;  ///< reasoning free models need room (>= 400)
   std::chrono::milliseconds timeout{60000};
   std::string apiKey;  ///< explicit key (tests); env var wins when set
 };
+
+/// Verified free-only pool (provenance: scripts/or-swarm FREE_MODELS,
+/// verified=True live 2026-09-17, cost 0). Never add a paid id here.
+inline const std::vector<std::string> kFreeModelPool = {
+    "nex-agi/nex-n2.5-pro:free",
+    "nex-agi/nex-n2.5-mini:free",
+    "cohere/north-mini-code:free",
+    "dots-studio/dots-3-note-preview:free",
+    "inclusionai/ling-3.0-flash-vl:free",
+    "inclusionai/ling-3.0-flash-sante:free",
+};
+
+namespace detail {
+// Free-only model resolution, exposed for unit tests.
+// "auto"/"" => shuffle-pick from kFreeModelPool. Explicit free ids pass.
+// Loopback hosts (unit-test stubs) bypass so tests assert payload shape.
+// Paid ids on real hosts fall back to a random free model — never spend.
+std::string resolveModelForHost(const LlmConfig& cfg, const std::string& host);
+}  // namespace detail
 
 struct LlmResponse {
   std::string content;

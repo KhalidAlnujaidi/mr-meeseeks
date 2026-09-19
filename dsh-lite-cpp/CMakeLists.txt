@@ -49,6 +49,22 @@ else()
   target_link_libraries(dshlite PUBLIC httplib)
 endif()
 target_link_libraries(dshlite PUBLIC nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)
+if(APPLE)
+  # httplib links brotli/zlib + macOS system certs; PUBLIC so standalone
+  # probes linking libdshlite.a get them transitively via CMake. (Manual
+  # c++ ... libdshlite.a links need: -lbrotlicommon -lbrotlidec
+  # -lbrotlienc -lz -framework Security -framework CoreFoundation
+  # -framework SystemConfiguration.)
+  find_library(BROTLI_COMMON_LIB brotlicommon REQUIRED)
+  find_library(BROTLI_DEC_LIB brotlidec REQUIRED)
+  find_library(BROTLI_ENC_LIB brotlienc REQUIRED)
+  find_library(Z_LIB z REQUIRED)
+  target_link_libraries(dshlite PUBLIC ${BROTLI_COMMON_LIB} ${BROTLI_DEC_LIB}
+                                       ${BROTLI_ENC_LIB} ${Z_LIB})
+  target_link_libraries(dshlite PUBLIC
+    "-framework Security" "-framework CoreFoundation"
+    "-framework SystemConfiguration")
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_compile_definitions(dshlite PUBLIC _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
 endif()

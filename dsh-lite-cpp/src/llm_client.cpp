@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <future>
 #include <mutex>
+#include <random>
 #include <stdexcept>
 #include <string>
 
@@ -57,7 +58,43 @@ std::string resolveKey(const LlmConfig& cfg) {
   return {};
 }
 
+// Free-only gate. "auto"/"" => shuffle-pick from kFreeModelPool.
+// Explicit free ids (in pool, or ":free" suffix) pass through.
+// Loopback hosts (unit-test stubs) bypass so tests can assert shape
+// with synthetic model names. Anything else (paid id on a real host)
+// falls back to a random free model — never spend.
+bool isLoopback(const std::string& host) {
+  return host == "127.0.0.1" || host == "localhost" || host == "::1";
+}
+
+bool isFreeId(const std::string& id) {
+  if (id.size() >= 5 && id.compare(id.size() - 5, 5, ":free") == 0)
+    return true;
+  for (const auto& m : kFreeModelPool)
+    if (m == id) return true;
+  return false;
+}
+
+std::string pickFreeModel() {
+  thread_local std::mt19937 rng{std::random_device{}()};
+  std::uniform_int_distribution<std::size_t> d(0, kFreeModelPool.size() - 1);
+  return kFreeModelPool[d(rng)];
+}
+
+std::string resolveModel(const LlmConfig& cfg, const std::string& host) {
+  if (isLoopback(host)) return cfg.model.empty() ? "unit-test-model" : cfg.model;
+  if (cfg.model.empty() || cfg.model == "auto") return pickFreeModel();
+  if (isFreeId(cfg.model)) return cfg.model;
+  return pickFreeModel();  // paid id rejected: free fallback, never spend
+}
+
 }  // namespace
+
+namespace detail {
+std::string resolveModelForHost(const LlmConfig& cfg, const std::string& host) {
+  return resolveModel(cfg, host);
+}
+}  // namespace detail
 
 LlmClient::LlmClient(LlmConfig cfg) : cfg_(std::move(cfg)) {}
 
@@ -73,9 +110,12 @@ LlmResponse LlmClient::post(const std::vector<Message>& messages) {
                              " unset and no explicit key configured)");
   }
   const SplitUrl u = splitUrl(cfg_.endpoint);
+  const std::string model = resolveModel(cfg_, u.host);  // free-only gate
 
   nlohmann::json body;
-  body["model"] = cfg_.model;
+  body["model"] = model;
+  // Reasoning free models return EMPTY content when starved of tokens.
+  body["max_tokens"] = cfg_.maxTokens > 0 ? cfg_.maxTokens : 1024;
   body["messages"] = nlohmann::json::array();
   for (const auto& m : messages)
     body["messages"].push_back({{"role", m.role}, {"content", m.content}});

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <functional>
 #include <iostream>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -119,8 +120,9 @@ int main() {
     check(g_lastAuth == "Bearer test-key", "Authorization Bearer sent");
     check(g_lastBody.find("\"unit-test-model\"") != std::string::npos &&
               g_lastBody.find("\"system\"") != std::string::npos &&
-              g_lastBody.find("\"user\"") != std::string::npos,
-          "OpenAI-compliant payload (model + roles)");
+              g_lastBody.find("\"user\"") != std::string::npos &&
+              g_lastBody.find("\"max_tokens\"") != std::string::npos,
+          "OpenAI-compliant payload (model + roles + max_tokens)");
     check(llm.requestCount() == 1, "requestCount == 1");
     const auto t = llm.totalUsage();
     check(t.promptTokens == 10 && t.completionTokens == 5 && t.totalTokens == 15,
@@ -202,6 +204,33 @@ int main() {
     LlmClient llm(c);
     check(throwsWith([&] { llm.post(msgs); }, "must start with"),
           "bad scheme rejected");
+  }
+
+  // 9. Free-only gate on REAL hosts (via detail::resolveModelForHost):
+  // "auto" shuffles within the verified free pool, explicit free ids
+  // pass, paid ids fall back to free (never spend). Loopback keeps
+  // synthetic names (proven by block 1 above).
+  {
+    using dshlite::detail::resolveModelForHost;
+    dshlite::LlmConfig c;
+    c.apiKey = "x";
+    c.model = "auto";
+    std::set<std::string> seen;
+    for (int i = 0; i < 20; ++i)
+      seen.insert(resolveModelForHost(c, "openrouter.ai"));
+    bool allFree = !seen.empty();
+    for (const auto& m : seen)
+      if (m.size() < 5 || m.compare(m.size() - 5, 5, ":free") != 0)
+        allFree = false;
+    check(allFree && seen.size() > 1, "auto shuffles across free pool");
+    c.model = "nex-agi/nex-n2.5-pro:free";
+    check(resolveModelForHost(c, "openrouter.ai") ==
+              "nex-agi/nex-n2.5-pro:free",
+          "explicit free id passes");
+    c.model = "openai/gpt-5-paid";
+    std::string fb = resolveModelForHost(c, "openrouter.ai");
+    check(fb.size() >= 5 && fb.compare(fb.size() - 5, 5, ":free") == 0,
+          "paid id rejected -> free fallback (never spend)");
   }
 
   srv.stop();
