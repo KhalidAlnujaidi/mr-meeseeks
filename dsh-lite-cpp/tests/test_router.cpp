@@ -42,12 +42,14 @@ struct StubEngine {
   int port = -1;
   std::string servedId;
   std::atomic<long> hits{0};
+  std::string lastBody;  // G1.2/F60: request-body evidence (wire shape)
 
   void start(const std::string& id, int portHint, const std::string& reply) {
     servedId = id;
     srv.Post("/v1/chat/completions",
              [this, reply](const httplib::Request& req, httplib::Response& res) {
                hits.fetch_add(1);
+               lastBody = req.body;
                if (req.body.find("\"" + servedId + "\"") == std::string::npos) {
                  res.status = 404;
                  res.set_content(R"({"error":{"type":"model_not_found"}})",
@@ -329,6 +331,67 @@ int main() {
   brain.stop();
   wkA.stop();
   wkB.stop();
+
+  // 11. G1.2 dual-family provisioning + role isolation + grammar wire
+  // (F60): brain=olmoe, worker/verifier pools = {glm, olmoe2} — two
+  // families per leaf pool, warnings clear; dispatch leaks nothing
+  // across roles/families; a constrained worker call carries
+  // response_format to the GLM engine (the grammar-capable family).
+  {
+    StubEngine olmoeBrain, glmWorker, olmoeWorker2;
+    olmoeBrain.start("olmoe-colibri", 18300, "brain only");
+    glmWorker.start("glm-5.2-colibri", 18310, "glm worker");
+    olmoeWorker2.start("olmoe-colibri", 18320, "olmoe worker2");
+    check(olmoeBrain.port != -1 && glmWorker.port != -1 && olmoeWorker2.port != -1,
+          "11: dual-family stub engines up (olmoe brain, glm+olmoe leaves)");
+
+    auto entry2 = [](StubEngine& s) {
+      EngineEntry e;
+      e.endpoint = s.url();
+      e.modelId = s.servedId;
+      e.apiKeyEnv = "DSHLITE_DEFINITELY_UNSET_ENV_VAR_XYZ";
+      return e;
+    };
+    RouterConfig cfg;
+    cfg.brain = {entry2(olmoeBrain)};
+    cfg.worker = {entry2(glmWorker), entry2(olmoeWorker2)};
+    cfg.verifier = {entry2(olmoeWorker2), entry2(glmWorker)};
+    ModelRouter r(cfg);
+    check(r.warnings().empty(),
+          "11/G1.2: two-family leaf pools => single-family warnings CLEARED");
+
+    const std::vector<Message> msgs = {{"user", "atom"}};
+    // Role isolation, both directions, by hit counters (no leakage).
+    auto b = r.post(Role::Brain, msgs);
+    check(b.servedBy == olmoeBrain.url() && b.response.content == "brain only" &&
+              glmWorker.hits == 0 && olmoeWorker2.hits == 0,
+          "11: brain role -> olmoe brain ONLY (zero leaf-family hits)");
+    auto w = r.post(Role::Worker, msgs);
+    check(w.servedBy == glmWorker.url() && w.response.content == "glm worker" &&
+              olmoeBrain.hits == 1,
+          "11: worker role -> glm first entry; brain engine untouched (no leak)");
+    auto v = r.post(Role::Verifier, msgs);
+    check(v.servedBy == olmoeWorker2.url() && olmoeBrain.hits == 1 &&
+              glmWorker.hits == 1,
+          "11: verifier role -> its own pool order; still zero brain hits");
+
+    // F60: grammar-constrained worker call — response_format reaches the
+    // GLM engine's wire (glm family = grammar_payload capable).
+    const auto rf = toolPayloadFormat({{"shell", nullptr}});
+    auto cw = r.postConstrained(Role::Worker, msgs, rf);
+    check(cw.servedBy == glmWorker.url() &&
+              glmWorker.lastBody.find("response_format") != std::string::npos &&
+              glmWorker.lastBody.find("json_schema") != std::string::npos,
+          "11/F60: constrained dispatch carries response_format to the GLM engine");
+    // And the brain wire NEVER sees response_format (no cross-role leak).
+    r.post(Role::Brain, msgs);
+    check(olmoeBrain.lastBody.find("response_format") == std::string::npos,
+          "11: brain wire carries no response_format (role-pure)");
+
+    olmoeBrain.stop();
+    glmWorker.stop();
+    olmoeWorker2.stop();
+  }
 
   std::cout << (failures == 0 ? "ROUTER PASS\n" : "ROUTER FAIL\n");
   return failures == 0 ? 0 : 1;

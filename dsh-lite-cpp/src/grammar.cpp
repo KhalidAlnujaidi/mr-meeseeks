@@ -183,7 +183,21 @@ bool familySupportsGrammar(const std::string& family) {
   // (line 1102); olmoe (1202: False,False,False,False... tools=True
   // grammar=False), qwen36/deepseek (1330 comment: "grammars no"),
   // kimi (1171), inkling (audio-only, 1133).
+  // F60: "glm53" (GLM-5.3-Flash) is a SEPARATE registry family with
+  // grammar_payload=False — callers holding a derived family string
+  // cannot distinguish it (deriveFamily collapses both to "glm");
+  // modelSupportsGrammar() below is the id-accurate check.
   return family == "glm";
+}
+
+bool modelSupportsGrammar(const std::string& modelId) {
+  // F60: glm-5.3-flash* is registry family glm53 (grammar_payload=
+  // False); every other glm-* id is family glm (True). Verified against
+  // family_registry.py capabilities table (glm53 321B: tools=True,
+  // grammar=False; glm 744B: tools=True, grammar=True).
+  if (modelId.rfind("glm", 0) != 0) return false;
+  if (modelId.find("5.3-flash") != std::string::npos) return false;  // glm53
+  return true;
 }
 
 nlohmann::json parseStrictPayload(const std::string& content) {

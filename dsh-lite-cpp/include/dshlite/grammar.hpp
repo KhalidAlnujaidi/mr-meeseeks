@@ -89,7 +89,19 @@ std::string toolPayloadGbnf(const std::vector<std::string>& toolNames);
 
 /// F46: grammar_payload capability per colibri family
 /// (family_registry.py capabilities; glm is the only true today).
+/// F60 QUIRK: deriveFamily maps BOTH glm-5.2 (family id "glm",
+/// grammar=True) and glm-5.3-flash (family id "glm53", grammar=False)
+/// to "glm" — for model-id-accurate capability use
+/// modelSupportsGrammar() below; the gateway stays the source of truth
+/// either way (it 400s what it cannot compile).
 bool familySupportsGrammar(const std::string& family);
+
+/// F60: model-id-aware grammar capability. glm-5.3-flash* => false
+/// (registry family glm53, grammar_payload=False); other glm-* ids =>
+/// true (family glm, the only grammar_payload=True entry); everything
+/// else false. Informational — used to pre-warn, never to gate: an
+/// uncapable engine's typed 400 refusal (F46/F51/F56) is authoritative.
+bool modelSupportsGrammar(const std::string& modelId);
 
 /// F45 strict parse: the WHOLE trimmed content must be one JSON value —
 /// no substring extraction, no fence stripping, no repair. The grammar

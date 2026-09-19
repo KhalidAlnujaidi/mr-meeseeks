@@ -54,7 +54,9 @@ src/grammar.cpp                 (colibri response_format wire contract:
                                  schema-subset laws; F45 strict payload
                                  parse — the grammar ACCELERATES drafts,
                                  the host gate stays the enforcement;
-                                 F46 grammar_payload family table)
+                                 F46 grammar_payload family table; F60
+                                 model-id-accurate capability — glm53
+                                 flash is NOT grammar-capable)
 include/dshlite/usage_probe.hpp P1: safe .coli_usage expert-heat reader
 src/usage_probe.cpp             (route_trace.h format: v1 headers, sparse
                                  triples, legacy, IKU1 refused by magic;

@@ -25,11 +25,17 @@
 // payloads then flow into runGatedTask — the gate receives structured
 // JSON directly from the (grammar-constrained) stream, never prose.
 //
-// Usage: g4-run <brain-url> <brain-model-id> <leaf-url> <leaf-model-id> [turns]
+// Usage: g4-run <brain-url> <brain-model-id> <leaf-url> <leaf-model-id>
+//               [leaf2-url leaf2-model-id] [turns]
 // F2 law: the brain endpoint may never sit in a leaf pool, so a valid
 // run needs two distinct endpoints (one engine may serve twice on two
 // ports — same family trips the G1.2 warning, which this driver
 // surfaces honestly rather than hiding).
+// G1.2 dual-family mode: pass leaf2 from a DIFFERENT family (e.g.
+// brain=olmoe, leaf=glm-5.2-colibri, leaf2=olmoe on a second port) and
+// the worker/verifier pools each hold two families — the single-family
+// warnings clear and grammar-constrained solicits can fall through to
+// whichever family supports grammar_payload (F46/F60).
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -216,14 +222,27 @@ int main(int argc, char** argv) {
   using namespace dshlite;
   if (argc < 5) {
     std::cerr << "usage: g4-run <brain-url> <brain-model-id> "
-                 "<leaf-url> <leaf-model-id> [turns]\n";
+                 "<leaf-url> <leaf-model-id> [leaf2-url leaf2-model-id] [turns]\n";
     return 2;
   }
   const std::string brainUrl = argv[1];
   const std::string brainModel = argv[2];
   const std::string leafUrl = argv[3];
   const std::string leafModel = argv[4];
-  const int turns = argc > 5 ? std::atoi(argv[5]) : 3;
+  // Optional second leaf (dual-family mode, G1.2). Disambiguate the
+  // trailing [turns] int from a URL positional.
+  std::string leaf2Url, leaf2Model;
+  int turns = 3;
+  if (argc > 5) {
+    const std::string a5 = argv[5];
+    if (a5.rfind("http", 0) == 0 && argc > 6) {
+      leaf2Url = a5;
+      leaf2Model = argv[6];
+      if (argc > 7) turns = std::atoi(argv[7]);
+    } else {
+      turns = std::atoi(argv[5]);
+    }
+  }
   // G4.2/F9: zero-external-network law — remote judge keys must be absent.
   try {
     assertNoRemoteJudgeEnv();
@@ -248,11 +267,28 @@ int main(int argc, char** argv) {
 
   RouterConfig rc;
   rc.brain = {makeEntry(brainUrl, brainModel)};
-  rc.worker = {makeEntry(leafUrl, leafModel)};     // F2: disjoint endpoint
-  rc.verifier = {makeEntry(leafUrl, leafModel)};
+  if (leaf2Url.empty()) {
+    rc.worker = {makeEntry(leafUrl, leafModel)};     // F2: disjoint endpoint
+    rc.verifier = {makeEntry(leafUrl, leafModel)};
+  } else {
+    // G1.2 dual-family: two leaf entries per pool, opposite orders so a
+    // fallthrough exercises the second family, not the same engine.
+    rc.worker = {makeEntry(leafUrl, leafModel), makeEntry(leaf2Url, leaf2Model)};
+    rc.verifier = {makeEntry(leaf2Url, leaf2Model), makeEntry(leafUrl, leafModel)};
+  }
   ModelRouter router(rc);
   for (const auto& w : router.warnings())
     std::cout << "[warn] " << w << "\n";
+  if (router.warnings().empty())
+    std::cout << "[ok] G1.2: no single-family warnings — heterogeneous pools registered\n";
+
+  // F60 pre-warn: which leaf models can actually serve grammar drafts.
+  // Informational only — the gateway's typed 400 stays authoritative.
+  for (const auto& m : {leafModel, leaf2Model}) {
+    if (m.empty()) continue;
+    std::cout << "[grammar] " << m << " -> grammar_payload="
+              << (modelSupportsGrammar(m) ? "yes" : "no") << "\n";
+  }
 
   // Pre-flight probe (G1.1): engine must answer its own model-id.
   for (const auto& p : router.probe()) {

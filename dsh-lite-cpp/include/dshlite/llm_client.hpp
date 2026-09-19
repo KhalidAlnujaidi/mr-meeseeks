@@ -108,6 +108,15 @@ struct LlmResponse {
   /// Non-empty content deltas seen on a stream (the estimate's input;
   /// 0 when not streaming). F36: empty keepalive deltas are NOT counted.
   long contentDeltas = 0;
+  /// F61 (GLM chat-template quirk): non-empty `reasoning_content`
+  /// deltas seen on a stream. The colibri gateway splits GLM's
+  /// <think>...</think> span into reasoning_content deltas (#597 item
+  /// 4) so the answer arrives as pure content — this client NEVER
+  /// appends reasoning to content (payload purity), but counts the
+  /// deltas for telemetry. Reasoning bytes DO reset stall liveness
+  /// (any wire byte, F6) and do NOT count toward the F33 token
+  /// estimate (they are not answer tokens).
+  long reasoningDeltas = 0;
 };
 
 /// Stall abort (G2.1/F6): thrown by post() when a streaming request saw

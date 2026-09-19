@@ -144,7 +144,8 @@ LlmResponse LlmClient::postImpl(const std::vector<Message>& messages,
     long ttftMs = -1;
     long promptTokens = 0, completionTokens = 0, totalTokens = 0;
     bool sawUsage = false;
-    long contentDeltas = 0;  // F33/F36: non-empty content deltas only
+    long contentDeltas = 0;    // F33/F36: non-empty content deltas only
+    long reasoningDeltas = 0;  // F61: GLM reasoning_content deltas (telemetry)
     std::string partial;  // SSE line buffer across receive chunks
     std::chrono::steady_clock::time_point t0;
     // Streaming liveness (G2.1/F6): every received chunk stamps lastByte
@@ -184,6 +185,11 @@ LlmResponse LlmClient::postImpl(const std::vector<Message>& messages,
         // must never inflate the token estimate.
         ++sse.contentDeltas;
       }
+      // F61: GLM streams <think> reasoning as reasoning_content deltas
+      // (gateway #597 item 4). Counted for telemetry; NEVER appended to
+      // content — the strict payload parser must see answer text only.
+      const std::string reasoning = d.value("reasoning_content", std::string());
+      if (!reasoning.empty()) ++sse.reasoningDeltas;
     }
     if (j.contains("usage") && j["usage"].is_object() && !j["usage"].is_null()) {
       const auto& w = j["usage"];
@@ -354,6 +360,7 @@ LlmResponse LlmClient::postImpl(const std::vector<Message>& messages,
       out.usage.totalTokens = sse.contentDeltas;  // prompt unknown => not added
     }
     out.contentDeltas = sse.contentDeltas;
+    out.reasoningDeltas = sse.reasoningDeltas;  // F61 telemetry
   } else {
     try {
       auto j = nlohmann::json::parse(res->body);

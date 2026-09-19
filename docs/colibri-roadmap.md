@@ -331,3 +331,28 @@ schema_gbnf.h, family_registry.py, docs/grammar-draft.md) before coding:
   calls (200 through the grammar path), per-arm delta — a refused
   grammar followed by fallback must never report "grammar reached the
   engine".
+
+### G1.2 dual-family + GLM grammar-wire addendum (F60-F61)
+
+- **F60 (capability quirk):** registry family glm53 (GLM-5.3-Flash,
+  321B) has grammar_payload=False; only family glm (GLM-5.2/5.3, 744B)
+  is True. deriveFamily collapses both ids to "glm", so
+  modelSupportsGrammar(modelId) is the id-accurate check (informational
+  pre-warn only — the gateway's typed 400 remains authoritative).
+- **F61 (GLM streaming quirk):** the gateway splits GLM's <think> span
+  into reasoning_content deltas (#597 item 4). Client law: reasoning is
+  counted (reasoningDeltas) but NEVER appended to content — payload
+  purity for the strict parser; reasoning bytes still reset stall
+  liveness and never inflate the F33 token estimate.
+- **Live-hardware blocker (honest):** the only grammar-capable family
+  (glm 744B) does not fit local disk (int4 ~370 GB vs 224 GB free);
+  glm53 321B fits but is NOT grammar-capable. Live grammar acceleration
+  therefore remains stub-proven (test-grammar §10 F61 GLM stream shape,
+  test-router §11 constrained dispatch) until a glm checkpoint exists.
+- g4-run gained dual-leaf mode: optional leaf2 (different family) puts
+  two families in worker/verifier pools — G1.2 warnings clear, grammar
+  solicits fall through to the capable family when one is present.
+- Live dual-id trace (real OLMoE engines, honest ids): brain olmoe +
+  leaves {glm-5.2-colibri, olmoe-leaf} — warnings cleared, role
+  isolation held, 2-turn A/B ok=2/2 both arms, nudges=0, both gated
+  tasks verified; ledger lines carry per-model attribution.

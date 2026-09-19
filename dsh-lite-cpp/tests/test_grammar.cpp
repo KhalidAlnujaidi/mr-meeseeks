@@ -488,6 +488,98 @@ int main() {
     streamRefuse.stop();
   }
 
+  // ── 10. F60 model-id capability quirk + F61 GLM streaming shape ───
+  {
+    // F60: glm-5.3-flash is registry family glm53 (grammar_payload=
+    // False) while glm-5.2 is family glm (True) — deriveFamily collapses
+    // both to "glm", so the id-accurate check must separate them.
+    check(modelSupportsGrammar("glm-5.2-colibri") &&
+              modelSupportsGrammar("glm-5.3-colibri") &&
+              !modelSupportsGrammar("glm-5.3-flash-colibri") &&
+              !modelSupportsGrammar("glm-5.3-flash-next-colibri") &&
+              !modelSupportsGrammar("olmoe-colibri") &&
+              !modelSupportsGrammar("qwen3.8-flash-next-colibri"),
+          "10/F60: model-id-accurate grammar capability (glm53-flash excluded)");
+    check(familySupportsGrammar("glm") && !familySupportsGrammar("glm53"),
+          "10/F60: family table — glm53 is NOT grammar-capable");
+  }
+  {
+    // F61: GLM-family streaming quirk — the gateway emits the <think>
+    // span as reasoning_content deltas BEFORE the answer's content
+    // deltas (#597 item 4). Laws: reasoning never contaminates content
+    // (payload purity), reasoning deltas are counted for telemetry,
+    // reasoning bytes still reset stall liveness, and the F33 token
+    // estimate counts only content deltas.
+    httplib::Server srv;
+    std::thread th;
+    int port = -1;
+    srv.Post("/v1/chat/completions",
+             [](const httplib::Request&, httplib::Response& res) {
+               res.set_chunked_content_provider(
+                   "text/event-stream",
+                   [](size_t, httplib::DataSink& sink) {
+                     auto send = [&sink](const std::string& frame) {
+                       std::string chunk = "data: " + frame + "\n\n";
+                       sink.write(chunk.data(), chunk.size());
+                     };
+                     // Think span first (reasoning_content deltas):
+                     send(R"({"choices":[{"delta":{"reasoning_content":"Let me "}}]})");
+                     send(R"({"choices":[{"delta":{"reasoning_content":"check the schema."}}]})");
+                     // Then the answer as pure content deltas:
+                     send(R"({"choices":[{"delta":{"content":"{\"tool\":\"shell\","}}]})");
+                     send(R"({"choices":[{"delta":{"content":"\"args\":{\"cmd\":\"echo atom\"}}"}}],)"
+                          R"("finish_reason":"stop"})");
+                     // Engine-authoritative usage (include_usage honored):
+                     send(R"({"choices":[],"usage":{"prompt_tokens":21,)"
+                          R"("completion_tokens":9,"total_tokens":30}})");
+                     send("[DONE]");
+                     sink.done();
+                     return true;
+                   });
+             });
+    for (int p = 19100; p < 19140; ++p) {
+      httplib::Server probe;
+      if (!probe.bind_to_port("127.0.0.1", p)) continue;
+      port = p;
+      break;
+    }
+    check(port != -1, "10/F61: GLM-shape streaming stub up");
+    if (port != -1) {
+      th = std::thread([&] { srv.listen("127.0.0.1", port); });
+      for (int i = 0; i < 100 && !srv.is_running(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+      LlmConfig c;
+      c.endpoint = "http://127.0.0.1:" + std::to_string(port) +
+                   "/v1/chat/completions";
+      c.model = "glm-5.2-colibri";
+      c.apiKeyEnv = "DSHLITE_DEFINITELY_UNSET_ENV_VAR_XYZ";
+      c.timeout = std::chrono::seconds(10);
+      c.stream = true;
+      LlmClient llm(c);
+      LlmResponse r = llm.post({{"user", "propose a shell tool call"}});
+      check(r.content == R"({"tool":"shell","args":{"cmd":"echo atom"}})",
+            "10/F61: reasoning_content NEVER contaminates content (payload pure)");
+      check(r.reasoningDeltas == 2 && r.contentDeltas == 2,
+            "10/F61: reasoning counted separately from content deltas");
+      check(r.usage.completionTokens == 9 && !r.usageEstimated,
+            "10/F61: engine usage authoritative; estimate untouched by reasoning");
+      // The pure content parses strict — the whole point of the quirk
+      // handling: a GLM tool payload survives the think span.
+      bool parsed = false;
+      try {
+        const auto j = parseStrictPayload(r.content);
+        parsed = j["tool"] == "shell" && j["args"]["cmd"] == "echo atom";
+      } catch (const PayloadFormatError&) {
+        parsed = false;
+      }
+      check(parsed, "10/F61: GLM streamed tool payload strict-parses clean");
+
+      srv.stop();
+      if (th.joinable()) th.join();
+    }
+  }
+
   eng.stop();
   std::cout << (failures == 0 ? "GRAMMAR PASS\n" : "GRAMMAR FAIL\n");
   return failures == 0 ? 0 : 1;
