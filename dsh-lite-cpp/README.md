@@ -41,7 +41,8 @@ ctest --test-dir build --output-on-failure
 ./build/dsh-lite --offline        # no network demo
 ./build/dsh-lite "your question"  # live: needs OPENROUTER_API_KEY
 
-ASan/UBSan: configure with
+ASan/UBSan (macOS note: LeakSanitizer is unsupported on this platform —
+omit ASAN_OPTIONS=detect_leaks=1, which aborts every binary at startup):
 -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
 -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
 

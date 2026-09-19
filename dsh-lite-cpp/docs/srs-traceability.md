@@ -10,7 +10,8 @@ Each SRS requirement, where it lives, and which test proves it.
 | Strip ANSI escapes (SGR, cursor, OSC, charset) | src/sanitizer.cpp ESC state machine | test_sanitizer 5-8 |
 | Broken multi-byte sequences dropped | bytes >= 0x80 dropped | test_sanitizer 3, 4 |
 | Truncate >4096: head 2048 + marker + tail 1024 | src/sanitizer.cpp tail | test_sanitizer 9-11 |
-| 10 MB in < 15 ms | memcpy span fast path | bench_sanitizer (7 ms) |
+| 10 MB in < 15 ms (Release; ASan/UBSan-instrumented Debug builds run
+| ~3x slower and are exempt — correctness only) | memcpy span fast path | bench_sanitizer Release 7 ms |
 | RAII, no leaks | std::string only, no new | ASan/UBSan clean |
 
 ## Module 2 — Process Isolation
