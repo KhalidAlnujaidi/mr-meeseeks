@@ -12,3 +12,8 @@ cpp-harness/build-native/
 cpp-harness/Testing/
 # Local benchmark outputs
 stats-*.html
+# Golem OSS hygiene: bench runtime dirs + local run outputs (regenerable)
+bench/h2h/sandbox-ours/
+bench/h2h/sandbox-theirs/
+dsh-lite-cpp/build*/
+*.log

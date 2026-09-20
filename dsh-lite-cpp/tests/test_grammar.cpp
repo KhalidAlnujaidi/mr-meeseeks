@@ -32,6 +32,7 @@
 //     grammar is an accelerator, never the enforcement.
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -421,7 +422,8 @@ int main() {
           "8: gate sees pre-validated JSON (structure, not prose)");
 
     // Prose reply => ok=false, nudge ledger line, NO payload handed on.
-    const std::string ledgerPath = "/tmp/hermes-grammar-ledger.jsonl";
+    const std::string ledgerPath =
+        (std::filesystem::temp_directory_path() / "golem-grammar-ledger.jsonl").string();
     ::remove(ledgerPath.c_str());
     {
       LedgerWriter lw(ledgerPath);

@@ -30,8 +30,10 @@ int main() {
     SpawnResult r = sp.spawn(o);
     check(r.exitCode == 0, "printf exits 0");
     check(r.sanitizedStdout == "hi \n", "stdout sanitized for Brain");
-    check(r.workspaceDir.rfind("/tmp/meeseeks_", 0) == 0,
-          "workspace is /tmp/meeseeks_<uuid>");
+    check(r.workspaceDir.rfind(
+              (std::filesystem::temp_directory_path() / "golem").string() + "/ws_",
+              0) == 0,
+          "workspace is <temp-dir>/golem/ws_<uuid>");
     check(std::filesystem::is_directory(r.workspaceDir),
           "workspace retained for forensics");
     SwarmSpawner::cleanup(r.workspaceDir);
@@ -40,13 +42,13 @@ int main() {
 
   // 2. Scrubbed env: hostile parent env NEVER leaks.
   {
-    ::setenv("MEESEEKS_HOST_SECRET", "super-secret-parent-token", 1);
+    ::setenv("GOLEM_HOST_SECRET", "super-secret-parent-token", 1);
     ::setenv("COLI_API_KEY", "sk-colibri-host-key-must-not-leak", 1);
     SpawnOptions o;
     o.argv = {"env"};  // prints its whole environment
     o.timeout = std::chrono::seconds(10);
     SpawnResult r = sp.spawn(o);
-    check(r.sanitizedStdout.find("MEESEEKS_HOST_SECRET") == std::string::npos,
+    check(r.sanitizedStdout.find("GOLEM_HOST_SECRET") == std::string::npos,
           "parent secret not in child env");
     check(r.sanitizedStdout.find("sk-colibri-host-key") == std::string::npos,
           "host API key not in child env");
@@ -70,7 +72,8 @@ int main() {
 
   // 4. CWD pinned to workspace + scope files symlinked in.
   {
-    const std::string scope = "/tmp/meeseeks_scope_probe.txt";
+    const std::string scope =
+        (std::filesystem::temp_directory_path() / "golem_scope_probe.txt").string();
     {
       std::ofstream f(scope);
       f << "scope-data\n";
@@ -108,7 +111,7 @@ int main() {
   // 6. Exec failure surfaces 127, never throws.
   {
     SpawnOptions o;
-    o.argv = {"/nonexistent/meeseeks-binary-xyz"};
+    o.argv = {"/nonexistent/golem-binary-xyz"};
     o.timeout = std::chrono::seconds(5);
     SpawnResult r = sp.spawn(o);
     check(r.exitCode == 127, "missing binary -> 127");

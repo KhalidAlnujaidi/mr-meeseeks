@@ -1,6 +1,6 @@
 # kilo-subagent — delegate one-shot tasks to Kilo Code's FREE tier
 
-Wrapper: `/Users/khalid/bin/kilo-subagent` (bash 3.2-compatible, macOS-safe)
+Wrapper: `~/bin/kilo-subagent` (install anywhere on PATH; bash 3.2-compatible, macOS-safe)
 
 Kilo Code CLI: `@kilocode/cli@7.7.2` at `/opt/homebrew/bin/kilo`
 Config: `~/.config/kilo/kilo.jsonc`   Auth: `~/.local/share/kilo/auth.json`

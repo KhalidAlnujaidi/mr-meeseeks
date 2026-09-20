@@ -13,6 +13,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -191,7 +192,8 @@ int main() {
   eng.stop();
 
   // ── P1: .coli_usage parsing ────────────────────────────────────────
-  const std::string dir = "/tmp/hermes-p1-" + std::to_string(::getpid());
+  const std::string dir = (std::filesystem::temp_directory_path() /
+                             ("golem-p1-" + std::to_string(::getpid()))).string();
   ::mkdir(dir.c_str(), 0755);
   {
     // v1 format: headers + sparse triples (route_trace.h).

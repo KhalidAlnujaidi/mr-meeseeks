@@ -23,6 +23,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -49,7 +50,9 @@ void check(bool ok, const char* label) {
   if (!ok) ++failures;
 }
 
-const char* kLedger = "/tmp/g4-ledger.jsonl";
+const std::string kLedgerPath =
+    (std::filesystem::temp_directory_path() / "golem-g4s-ledger.jsonl").string();
+const char* kLedger = kLedgerPath.c_str();
 
 // Stub SSE engine: streams `bodyChars` of content as deltas (big-reply
 // knob for the compaction stress), then usage, then [DONE].
@@ -157,7 +160,8 @@ int main() {
   }
 
   // Synthetic heat file (e): fresh mtime => warm=true in the ledger.
-  const std::string heatDir = "/tmp/hermes-g4s-" + std::to_string(::getpid());
+  const std::string heatDir = (std::filesystem::temp_directory_path() /
+                                 ("golem-g4s-" + std::to_string(::getpid()))).string();
   ::mkdir(heatDir.c_str(), 0755);
   const std::string heatPath = heatDir + "/coli_usage";
   { std::ofstream o(heatPath); o << "-1 16 64\n-2 1 7\n0 3 12\n"; }

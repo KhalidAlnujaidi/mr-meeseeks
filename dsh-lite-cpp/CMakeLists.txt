@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(dsh-lite-cpp LANGUAGES CXX)
+project(golem LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -138,6 +138,10 @@ if(TARGET dshlite-abi)
   # a serve engine for the http arm; runs sequentially per F70).
   add_executable(abi-bench tests/abi_bench.cpp)
   target_link_libraries(abi-bench PRIVATE dshlite-abi)
+
+  # Mixed-lane production run driver (manual: ABI brain + HTTP workers).
+  add_executable(mixed-lane-run tests/mixed_lane_run.cpp)
+  target_link_libraries(mixed-lane-run PRIVATE dshlite-abi)
 endif()
 add_executable(bench-sanitizer tests/bench_sanitizer.cpp)
 target_link_libraries(bench-sanitizer PRIVATE dshlite)

@@ -5,6 +5,7 @@
 
 #include "dshlite/abi_client.hpp"
 
+#include <algorithm>
 #include <cstring>
 
 extern "C" {
@@ -109,6 +110,7 @@ AbiClient::AbiClient(AbiConfig cfg) : cfg_(std::move(cfg)) {
   numLayers_ = impl_->edgeCap.num_layers;
   stateWidth_ = impl_->edgeCap.state_width;
   maxContextTokens_ = impl_->edgeCap.max_context_tokens;
+  maxBatchRows_ = impl_->edgeCap.max_batch_rows;
   eosTokenId_ = impl_->edgeCap.eos_token_id;
   if (!(impl_->edgeCap.flags & COLI_EDGE_CAP_TOKENIZE) ||
       !(impl_->edgeCap.flags & COLI_EDGE_CAP_GREEDY)) {
@@ -203,48 +205,57 @@ LlmResponse AbiClient::post(const std::vector<Message>& messages) {
   if (promptCount > SIZE_MAX / rowBytes) {
     throw AbiError("prompt activation size overflows");
   }
-  std::vector<float> in(promptCount * rowBytes / sizeof(float));
-  std::vector<float> out(promptCount * rowBytes / sizeof(float));
+  // Prefill: embed + run in CHUNKS of maxBatchRows_ (adapter cap —
+  // olmoe edge advertises 128; a longer flattened history is legal and
+  // must be split, caught live: "edge batch exceeds capabilities").
+  // Firewall wired into every ABI call.
+  const size_t chunk = maxBatchRows_ > 0 ? maxBatchRows_ : promptCount;
+  std::vector<float> in(chunk * rowBytes / sizeof(float));
+  std::vector<float> out(chunk * rowBytes / sizeof(float));
 
-  // Prefill: embed all prompt rows, run the full layer stack.
   ColiEdgeEmbedRequest embed{};
   embed.struct_size = sizeof(embed);
-  embed.rows = static_cast<std::uint32_t>(promptCount);
-  embed.token_ids = promptIds.data();
-  embed.token_count = promptCount;
-  embed.output = in.data();
-  embed.output_bytes = in.size() * sizeof(float);
   embed.should_cancel = &WallClockFirewall::hit;
   embed.cancel_user_data = &fw;
-  if (coli_edge_embed(impl_->edge, &embed, error, sizeof(error)) != 0) {
-    if (fw.tripped.load()) throw AbiCancelledError("wall-clock firewall tripped during embed (prefill)");
-    throw AbiError(std::string("embed (prefill): ") + error);
-  }
-
   ColiSegmentRunRequest run{};
   run.struct_size = sizeof(run);
-  run.rows = static_cast<std::uint32_t>(promptCount);
-  run.position = 0;
-  run.token_ids = promptIds.data();
-  run.token_count = promptCount;
-  run.input = in.data();
-  run.input_bytes = in.size() * sizeof(float);
-  run.output = out.data();
-  run.output_bytes = out.size() * sizeof(float);
   run.should_cancel = &WallClockFirewall::hit;
   run.cancel_user_data = &fw;
-  if (coli_segment_run(session, &run, error, sizeof(error)) != 0) {
-    if (fw.tripped.load()) throw AbiCancelledError("wall-clock firewall tripped during segment_run (prefill)");
-    throw AbiError(std::string("segment_run (prefill): ") + error);
+
+  for (size_t base = 0; base < promptCount; base += chunk) {
+    const size_t rows = std::min(chunk, promptCount - base);
+    embed.rows = static_cast<std::uint32_t>(rows);
+    embed.token_ids = promptIds.data() + base;
+    embed.token_count = rows;
+    embed.output = in.data();
+    embed.output_bytes = rows * rowBytes;
+    if (coli_edge_embed(impl_->edge, &embed, error, sizeof(error)) != 0) {
+      if (fw.tripped.load()) throw AbiCancelledError("wall-clock firewall tripped during embed (prefill)");
+      throw AbiError(std::string("embed (prefill): ") + error);
+    }
+    run.rows = static_cast<std::uint32_t>(rows);
+    run.position = static_cast<std::uint64_t>(base);
+    run.token_ids = promptIds.data() + base;
+    run.token_count = rows;
+    run.input = in.data();
+    run.input_bytes = rows * rowBytes;
+    run.output = out.data();
+    run.output_bytes = rows * rowBytes;
+    if (coli_segment_run(session, &run, error, sizeof(error)) != 0) {
+      if (fw.tripped.load()) throw AbiCancelledError("wall-clock firewall tripped during segment_run (prefill)");
+      throw AbiError(std::string("segment_run (prefill): ") + error);
+    }
   }
 
-  // Select next token from the LAST prompt row (greedy, engine head).
+  // Select next token from the LAST prompt row's output activation
+  // (final chunk's tail row).
+  const size_t lastChunkRows = ((promptCount - 1) % chunk) + 1;
   std::int32_t predicted = -1;
   float score = 0.0f;
   ColiEdgeSelectRequest select{};
   select.struct_size = sizeof(select);
   select.rows = 1;
-  select.input = out.data() + (promptCount - 1) * stateWidth_;
+  select.input = out.data() + (lastChunkRows - 1) * stateWidth_;
   select.input_bytes = rowBytes;
   select.token_ids = &predicted;
   select.token_capacity = 1;

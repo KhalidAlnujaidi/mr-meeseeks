@@ -3,6 +3,7 @@
 // is faked via ILlmPoster; no network, no keys.
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -163,7 +164,8 @@ int main() {
     BrainLoop b(llm, [](const std::string&) { return v(JudgeAction::DoDirect); });
     BrainLoop::HostConfig hc;
     hc.policy.allowedTools = {"shell"};
-    const std::string ledgerPath = "/tmp/hermes-brain-gate.jsonl";
+    const std::string ledgerPath =
+        (std::filesystem::temp_directory_path() / "golem-brain-gate.jsonl").string();
     ::remove(ledgerPath.c_str());
     LedgerWriter lw(ledgerPath);
     hc.ledger = &lw;

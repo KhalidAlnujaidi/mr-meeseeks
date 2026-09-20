@@ -14,7 +14,7 @@
 //     different model family; a 3rd full-scope retry is rejected by
 //     construction (MustNarrowOrReroute), and anything past the
 //     narrowed 3rd attempt is StopAndReport — never silently redo
-//     full-scope labor (meeseeks-doctrine rule 5).
+//     full-scope labor (worker doctrine rule 5).
 //
 // The 4th nudge and the 3rd full-scope retry MUST be rejected here —
 // prompt text contradicting these gates loses (standing doctrine 5).

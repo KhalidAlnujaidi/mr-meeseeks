@@ -5,8 +5,9 @@
 //  - true native processes via POSIX fork()/execve(), detached memory.
 //  - scrubbed envp[]: ONLY SpawnOptions::allowedEnv reaches the child.
 //    Host tokens / API keys NEVER leak unless explicitly listed there.
-//  - dedicated workspace /tmp/meeseeks_<uuid>/ per task; only listed
-//    scopeFiles are symlinked in; the child CWD is pinned there.
+//  - dedicated workspace <temp-dir>/golem/ws_<uuid>/ per task (temp
+//    boundary via std::filesystem, override GOLEM_WORKSPACE_ROOT); only
+//    listed scopeFiles are symlinked in; the child CWD is pinned there.
 //  - stdout/stderr captured through CLOEXEC pipes, sanitized (Module 1)
 //    before the Brain ever sees them.
 //  - watchdog thread SIGKILLs the child past opt.timeout (default 60 s).

@@ -144,6 +144,11 @@ class AbiClient : public ILlmPoster {
   std::uint32_t numLayers() const { return numLayers_; }
   std::uint32_t stateWidth() const { return stateWidth_; }
   std::uint32_t maxContextTokens() const { return maxContextTokens_; }
+  /// Adapter-advertised embed/run batch cap (olmoe edge: 128). Prefill
+  /// is chunked to respect it — a prompt longer than the cap is NOT an
+  /// error (caught live: turn-2 history exceeded 128 rows and the ABI
+  /// rejected the whole embed with "edge batch exceeds capabilities").
+  std::uint32_t maxBatchRows() const { return maxBatchRows_; }
   std::int32_t eosTokenId() const { return eosTokenId_; }
   std::uint64_t memoryLimitBytes() const { return cfg_.memoryLimitBytes; }
 
@@ -155,6 +160,7 @@ class AbiClient : public ILlmPoster {
   std::uint32_t numLayers_ = 0;
   std::uint32_t stateWidth_ = 0;
   std::uint32_t maxContextTokens_ = 0;
+  std::uint32_t maxBatchRows_ = 0;  // 0 = adapter advertised no cap
   std::int32_t eosTokenId_ = -1;
   mutable std::mutex mu_;  // guards total_/requests_ (F83 aggregation)
   TokenUsage total_{};

@@ -1,14 +1,20 @@
-# dsh-lite-cpp — Minimalist Budget-AGI Harness
+# Golem Runtime (`dsh-lite-cpp/`) — LeastGen's Native C++ Agent Runtime
 
-Ultra-lightweight C++20 Brain-and-Swarm orchestrator. The Brain keeps
-strategy; all labor runs in short-lived isolated worker subprocesses;
-only sanitized markdown summaries cross the context firebreak.
+Zero-dependency, native C++20 agent runtime for local & edge LLMs — the
+core of [LeastGen Golem](../README.md). The Brain keeps strategy; every
+piece of labor runs in a single-purpose, ephemeral worker process
+spawned under strict host control (scrubbed env, pinned workspace,
+watchdog kill); only sanitized summaries cross the context firebreak.
+Zero-IPC execution, instant cleanup, append-only ledger.
+
+The directory keeps its historical name (`dsh-lite-cpp`) for path
+stability; the CMake project, artifacts, and docs are branded Golem.
 
 ## Architecture (complete picture)
 
 1. **Zero-trust C++ sandbox** — every worker is a real fork/execve
    process: scrubbed envp (only the explicit allowlist), pinned
-   ephemeral workspace `/tmp/meeseeks_<uuid>/`, CLOEXEC pipes, 60 s
+   ephemeral workspace `<temp-dir>/golem/ws_<uuid>/`, CLOEXEC pipes, 60 s
    watchdog SIGKILL. Worker output is bitstream-sanitized (Module 1)
    before the Brain ever sees it. ASan/UBSan build flags are documented
    below and used for the threaded/concurrency suites; bench-sanitizer
@@ -44,7 +50,7 @@ include/dshlite/sanitizer.hpp  Module 1: Context Firebreak & Bitstream Sanitizer
 src/sanitizer.cpp               (printable ASCII + TAB/LF/CR only, ANSI stripped,
                                  truncate >4096 chars to head 2048 + marker + tail 1024)
 include/dshlite/spawner.hpp     Module 2: Swarm spawner contract
-src/spawner.cpp                 (fork/execve, scrubbed env, /tmp/meeseeks_<uuid>/,
+src/spawner.cpp                 (fork/execve, scrubbed env, <temp>/golem/ws_<uuid>/,
                                  CLOEXEC pipes, 60 s watchdog SIGKILL, exit 124 on timeout)
 include/dshlite/llm_client.hpp  Module 3a: Colibri-only HTTP client
 src/llm_client.cpp              (cpp-httplib + OpenSSL, sync + async POST,
@@ -114,7 +120,8 @@ src/usage_probe.cpp             (route_trace.h format: v1 headers, sparse
                                  best-effort telemetry, gates nothing (F5))
 src/main.cpp                    dsh-lite demo binary
 tests/test_{sanitizer,spawner,brain,llm,router,ledger,nudge,stall,f33_p1,g4_stress,grammar,abi}.cpp   milestone acceptance suites
-tests/g4_run.cpp                Gap 4 live-run driver (needs running engines; ledger to /tmp)
+tests/g4_run.cpp                Gap 4 live-run driver (needs running engines; ledger to
+                                $GOLEM_LEDGER or <temp>/golem-g4-ledger.jsonl)
 tests/abi_bench.cpp             in-process vs HTTP lane bench (manual; sequential arms per F70)
 tests/bench_sanitizer.cpp       10 MB / 15 ms perf gate
 test-abi offline checks are ctest-hermetic; the live engine section runs

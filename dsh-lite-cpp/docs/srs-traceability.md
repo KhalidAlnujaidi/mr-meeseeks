@@ -20,7 +20,7 @@ Each SRS requirement, where it lives, and which test proves it.
 |---|---|---|
 | fork()/execve(), detached memory | src/spawner.cpp | test_spawner 1 |
 | Scrubbed envp[], no host keys | child gets only allowedEnv | test_spawner 2, 3 |
-| /tmp/meeseeks_<uuid>/ + scope symlinks, pinned CWD | makeWorkspace + chdir | test_spawner 4 |
+| <temp>/golem/ws_<uuid>/ + scope symlinks, pinned CWD | makeWorkspace + chdir | test_spawner 4 |
 | Watchdog SIGKILL, default 60 s, sentinel | poll-loop + kill/waitpid | test_spawner 5 (124) |
 | Sanitized summaries only to Brain | sanitize() on both streams | test_spawner 1, 5 |
 

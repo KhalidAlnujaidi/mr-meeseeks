@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <cstdio>
 #include <fstream>
 #include <functional>
@@ -133,8 +134,10 @@ struct SseEngine {
 };
 
 std::string tmpLedgerPath(const char* tag) {
-  return std::string("/tmp/hermes-ledger-") + tag + "-" +
-         std::to_string(::getpid()) + ".jsonl";
+  return (std::filesystem::temp_directory_path() /
+          ("golem-ledger-" + std::string(tag) + "-" +
+           std::to_string(::getpid()) + ".jsonl"))
+      .string();
 }
 }  // namespace
 
@@ -331,7 +334,8 @@ int main() {
 
   // ── F39 heat -> cache.warm wiring ──────────────────────────────────
   {
-    const std::string dir = "/tmp/hermes-heat-" + std::to_string(::getpid());
+    const std::string dir = (std::filesystem::temp_directory_path() /
+                             ("golem-heat-" + std::to_string(::getpid()))).string();
     ::mkdir(dir.c_str(), 0755);
     const std::string warmPath = dir + "/warm";
     const std::string coldPath = dir + "/cold";

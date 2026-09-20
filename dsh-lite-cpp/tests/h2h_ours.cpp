@@ -408,7 +408,7 @@ int main(int argc, char** argv) {
       opt.argv = {"/bin/sh", "-c", payload["args"].value("cmd", "false")};
       opt.timeout = std::chrono::seconds(30);
       // ARCHITECTURE NOTE (fair delta, bench/h2h/README.md F71): fresh
-      // ephemeral workspace per spawn (/tmp/meeseeks_<uuid>, cleaned
+      // ephemeral workspace per spawn (<temp>/golem/ws_<uuid>, cleaned
       // after) — no shared mutable state, canary never in scope. smol-
       // agents' LocalPythonExecutor uses a PERSISTENT cwd instead. T1/T2
       // are independent capability probes: well-formed tool call +

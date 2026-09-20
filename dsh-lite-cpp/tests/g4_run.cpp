@@ -8,7 +8,7 @@
 //   + LedgerWriter v2 (socket-boundary tok/s, ttft, DENY/nudge/verify).
 //
 // Zero external network (G4.2): loopback engine only; remote-judge keys
-// asserted absent (F9). Ledger path: /tmp/g4-ledger.jsonl (bench law:
+// asserted absent (F9). Ledger path: $GOLEM_LEDGER or <temp>/golem-g4-ledger.jsonl:
 // never prod state). Run tags: g4g.* (F55) — separable from earlier
 // g4.* live runs and g4s.* stub-stress lines in the shared ledger.
 //
@@ -38,6 +38,7 @@
 // whichever family supports grammar_payload (F46/F60).
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -251,7 +252,12 @@ int main(int argc, char** argv) {
     return 3;
   }
 
-  LedgerWriter ledger("/tmp/g4-ledger.jsonl");
+  const char* ledgerEnv = std::getenv("GOLEM_LEDGER");
+  const std::string ledgerPath =
+      (ledgerEnv && *ledgerEnv)
+          ? ledgerEnv
+          : (std::filesystem::temp_directory_path() / "golem-g4-ledger.jsonl").string();
+  LedgerWriter ledger(ledgerPath);
 
   auto makeEntry = [](const std::string& url, const std::string& model) {
     EngineEntry e;
@@ -355,7 +361,7 @@ int main(int argc, char** argv) {
   // Ledger baseline so the delta summary counts only THIS run's lines.
   long ledgerLinesBefore = 0;
   {
-    std::ifstream in("/tmp/g4-ledger.jsonl");
+    std::ifstream in(ledgerPath);
     std::string ln;
     while (std::getline(in, ln))
       if (!ln.empty()) ++ledgerLinesBefore;
@@ -456,7 +462,7 @@ int main(int argc, char** argv) {
   // Ledger delta summary (F55): count this run's tagged lines by type.
   long newLines = 0, nudge = 0, report = 0, deny = 0, verify = 0, warm = 0;
   {
-    std::ifstream in("/tmp/g4-ledger.jsonl");
+    std::ifstream in(ledgerPath);
     std::string ln;
     long idx = 0;
     while (std::getline(in, ln)) {
@@ -476,6 +482,6 @@ int main(int argc, char** argv) {
             << "new_lines=" << newLines << " report=" << report
             << " nudge=" << nudge << " verify=" << verify << " DENY=" << deny
             << " warm_cache=" << warm << "\n";
-  std::cout << "ledger: /tmp/g4-ledger.jsonl\n";
+  std::cout << "ledger: " << ledgerPath << "\n";
   return 0;
 }

@@ -29,13 +29,21 @@ constexpr int TIMEOUT_SENTINEL = 124;
 constexpr const char* kDefaultPath =
     "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 
+// Workspace root: std::filesystem temp boundary (honors TMPDIR), never
+// a hardcoded /tmp. Override for tests/containers via GOLEM_WORKSPACE_ROOT.
+std::string workspaceRoot() {
+  const char* env = ::getenv("GOLEM_WORKSPACE_ROOT");
+  if (env != nullptr && *env != '\0') return std::string(env);
+  return (std::filesystem::temp_directory_path() / "golem").string();
+}
+
 std::string makeWorkspace() {
   std::random_device rd;
   std::array<unsigned, 4> r{rd(), rd(), rd(), rd()};
-  char buf[64];
-  std::snprintf(buf, sizeof(buf), "/tmp/meeseeks_%08x%08x%08x%08x", r[0],
-                r[1], r[2], r[3]);
-  return std::string(buf);
+  char suffix[64];
+  std::snprintf(suffix, sizeof(suffix), "ws_%08x%08x%08x%08x", r[0], r[1],
+                r[2], r[3]);
+  return workspaceRoot() + "/" + suffix;
 }
 
 std::string baseNameOf(const std::string& p) {
@@ -69,8 +77,10 @@ void setCloexec(int fd) {
 
 void SwarmSpawner::cleanup(const std::string& workspaceDir) noexcept {
   if (workspaceDir.empty()) return;
-  // Contain blast radius: only ever remove our own /tmp/meeseeks_* dirs.
-  if (workspaceDir.rfind("/tmp/meeseeks_", 0) != 0) return;
+  // Contain blast radius: only ever remove directories under OUR OWN
+  // workspace root (never arbitrary paths a caller passes in).
+  const std::string root = workspaceRoot();
+  if (workspaceDir.rfind(root + "/", 0) != 0) return;
   try {
     std::filesystem::remove_all(workspaceDir);
   } catch (...) {
@@ -87,7 +97,7 @@ SpawnResult SwarmSpawner::spawn(const SpawnOptions& opt) {
     return res;
   }
 
-  // 1. Workspace: /tmp/meeseeks_<uuid>/, scope files symlinked in.
+  // 1. Workspace: <temp-dir>/golem/ws_<uuid>/, scope files symlinked in.
   res.workspaceDir = makeWorkspace();
   try {
     std::filesystem::create_directories(res.workspaceDir);
