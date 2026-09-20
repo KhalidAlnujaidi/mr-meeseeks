@@ -4,6 +4,40 @@ Ultra-lightweight C++20 Brain-and-Swarm orchestrator. The Brain keeps
 strategy; all labor runs in short-lived isolated worker subprocesses;
 only sanitized markdown summaries cross the context firebreak.
 
+## Architecture (complete picture)
+
+1. **Zero-trust C++ sandbox** — every worker is a real fork/execve
+   process: scrubbed envp (only the explicit allowlist), pinned
+   ephemeral workspace `/tmp/meeseeks_<uuid>/`, CLOEXEC pipes, 60 s
+   watchdog SIGKILL. Worker output is bitstream-sanitized (Module 1)
+   before the Brain ever sees it. ASan/UBSan build flags are documented
+   below and used for the threaded/concurrency suites; bench-sanitizer
+   (10 MB / 15 ms perf gate) is a ctest member.
+2. **Dual-lane routing engine** — one ModelRouter, two transports per
+   EngineEntry: native in-process C ABI decode through
+   `libcolibri_segment_edge.a` (zero serve/Python/HTTP/IPC; measured
+   1.33x wall-clock and +41% decode tok/s vs HTTP on local OLMoE) with
+   the HTTP `coli serve` lane as fallback/peer. Lanes mix freely across
+   roles (ABI brain + HTTP workers, or the reverse); ABI support is
+   INJECTED (RouterConfig::abiFactory) so the core links zero Colibri;
+   cross-lane fallback uses typed attempt outcomes (abi-cancelled,
+   abi-context-overflow) under the same F2 worker->worker law.
+3. **Host-enforced execution contract** — the pre-execution payload
+   gate (schema -> allowlist -> destructive word-boundary scan;
+   DESTRUCTIVE_PROPOSE_ONLY never auto-spawns), history compaction
+   (8192/4096/1024, protected roles, budgeted markers), and NudgeState
+   caps (maxNudgeDepth=3, MAX_ROUNDS_PER_TASK=2) all live in the C++
+   host — the model can never vote itself out of them.
+4. **Velocity firewalling on both lanes, one ledger** — the HTTP lane
+   fires at the socket boundary (SSE no-bytes stall + G3.2 decode tok/s
+   floor with warmup exemption); the ABI lane fires in-process through
+   the engine's own should_cancel callback (wall-clock deadline wired
+   into embed/segment_run/select — deterministic abort, no signals).
+   Every turn, refusal, nudge, verify, and route decision emits
+   ledger.jsonl v2: mutex-guarded single write(2), host-stamped UTC,
+   honest token provenance (engine-authoritative, flagged estimates,
+   or real in-process counts — never fabricated).
+
 ## Layout
 
 include/dshlite/sanitizer.hpp  Module 1: Context Firebreak & Bitstream Sanitizer
@@ -28,7 +62,14 @@ src/router.cpp                  (role -> ordered (endpoint, model-id) pools,
                                  worker->worker fallback — never to the brain,
                                  <2-family pool warnings, isolated probe,
                                  thread-safe pooled dispatch, G3.2 velocity
-                                 floor with per-entry warmup exemption)
+                                 floor with per-entry warmup exemption;
+                                 MIXED LANES: EngineEntry.backend selects
+                                 HTTP vs InProcessAbi via injected
+                                 RouterConfig::abiFactory — core links no
+                                 Colibri (F83); ABI identity abi:<modelDir>
+                                 (F81), config-time factory law (F85),
+                                 typed abi-cancelled/abi-context-overflow
+                                 attempt outcomes fall through F2-style)
 include/dshlite/ledger.hpp      Module 4: ledger.jsonl v2 emitter (Gap 3/4)
 src/ledger.cpp                  (mutex + single write(2) per line (F15),
                                  ttft null when unmeasured (F11), detail
@@ -72,9 +113,14 @@ src/usage_probe.cpp             (route_trace.h format: v1 headers, sparse
                                  temp+rename (F37); warm=mtime-fresh (F38);
                                  best-effort telemetry, gates nothing (F5))
 src/main.cpp                    dsh-lite demo binary
-tests/test_{sanitizer,spawner,brain,llm,router,ledger,nudge,stall,f33_p1,g4_stress,grammar}.cpp   milestone acceptance suites
+tests/test_{sanitizer,spawner,brain,llm,router,ledger,nudge,stall,f33_p1,g4_stress,grammar,abi}.cpp   milestone acceptance suites
 tests/g4_run.cpp                Gap 4 live-run driver (needs running engines; ledger to /tmp)
+tests/abi_bench.cpp             in-process vs HTTP lane bench (manual; sequential arms per F70)
 tests/bench_sanitizer.cpp       10 MB / 15 ms perf gate
+test-abi offline checks are ctest-hermetic; the live engine section runs
+only when ABI_MODEL_DIR is set. abi-probe/abi-bench/dshlite-abi targets
+auto-disable when colibri/c/build/segment/libcolibri_segment_edge.a is
+absent (make -C ../colibri/c segment-edge-library).
 tests/test_llm.cpp uses an in-process loopback stub server that mimics
 `coli serve` (404 unless body.model matches the served id; no keys, no
 TLS): it proves the verbatim model-id payload, response ingestion,

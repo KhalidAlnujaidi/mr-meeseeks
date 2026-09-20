@@ -356,3 +356,50 @@ schema_gbnf.h, family_registry.py, docs/grammar-draft.md) before coding:
   leaves {glm-5.2-colibri, olmoe-leaf} — warnings cleared, role
   isolation held, 2-turn A/B ok=2/2 both arms, nudges=0, both gated
   tasks verified; ledger lines carry per-model attribution.
+
+### Native C ABI lane addendum (F72-F85, implemented)
+
+Head-to-head bench (bench/h2h, F62-F71) against smolagents 1.26 on the
+same local OLMoE engine exposed F72, and the native lane work closed
+the rest:
+
+- **F72 (exit-code vs content postcondition):** exit-0 verify proves a
+  command RAN, not that it did the TASK. Caught live: T1 solicited
+  `echo hello > hello.txt` — exit 0, artifact missing "ATOM". Fix:
+  tasks.json ground_truth content postconditions checked inside the
+  ephemeral workspace before cleanup; "verified" requires BOTH layers;
+  analyze.py grades PASS (exit0+content) / CONTENT-FAIL and labels
+  pre-F72 artifacts instead of silently passing them.
+- **F73 (prompt-example content bleed):** caught BY F72 on its first
+  live run — the solicit prompt's example cmd ("echo hello") bled into
+  model payloads via OLMoE surface mimicry (F58). Fix: task-unrelated
+  example + do-not-copy instruction. Evidence preserved in
+  bench/h2h/out/f73-prefix-evidence/.
+- **Native lane (abi_probe -> AbiClient):** in-process greedy decode
+  through colibri's public segment/edge C ABI
+  (libcolibri_segment_edge.a): register adapters -> edge engine open
+  (memory_limit_bytes wired from C++) -> tokenize -> embed ->
+  segment_run [0,layers) -> select -> detokenize. No serve, no Python,
+  no HTTP, zero IPC. Wall-clock firewall via the engine's own
+  should_cancel callback (typed AbiCancelledError); per-call sessions
+  (F77) so an abort cannot corrupt engine state; F75 context preflight
+  (typed AbiContextOverflowError); F76 caps-driven EOS only; F80
+  flattening delta (no chat template on the native lane) documented,
+  never hidden.
+- **Mixed-lane router (F81-F85):** EngineEntry.backend =
+  HttpColiServe | InProcessAbi; ABI support injected via
+  RouterConfig::abiFactory so core dshlite links ZERO Colibri (F83,
+  verified by include grep + nm). ABI identity abi:<modelDir> (F81);
+  probe reports ABI entries resident-since-construction, never opens a
+  second engine (F82); factory derives adapter family via
+  deriveFamily (F84); missing factory = config-time throw (F85).
+  Cross-lane fallback: typed abi-cancelled / abi-context-overflow
+  attempt outcomes fall through F2-style; HTTP servedBy stays verbatim
+  URL (regression caught by existing tests during dev).
+- **Measured (abi-bench, same prompt/budget, sequential arms per F70,
+  local OLMoE):** in-process 1.33x wall-clock, +41% decode tok/s
+  (13.51 vs 9.61), ttft -24%. Honest caveat: 2-rep point estimate on a
+  disk-bound box; rep variance high (10.6-16.4 tok/s ABI arm).
+- **Discovery (documented, not fixed here):** colibri engine open calls
+  exit() itself on missing config.json — a bogus modelDir cannot be an
+  error-return assertion in tests (test_abi.cpp notes it).

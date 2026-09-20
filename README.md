@@ -3,13 +3,15 @@
 *"I'm Mr. Meeseeks, look at me!"* — a swarm of small helpers, each with a
 different brain, spawned to do one job.
 
-This repo has three parts:
+This repo has five parts:
 
 | Dir | What |
 |---|---|
 | `plugin/` | **dsh-mr-meeseeks**: a 1:1 functional replica of [`dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-teams) v0.1.13 (MIT), with the whale avatars swapped for Meeseeks art. Same 10 `agent_teams_*` tools, same task DAG, scheduler, routes, and slots. |
 | `preset/budget-agi/` | **Budget-AGI**: a DeepSeek Harness agent preset. The main session is the brain (thinks, decides, verifies); all labor delegates to Meeseeks teams by default. Copy into `~/.dsh/.agent-presets/budget-agi/`. |
 | `scripts/` | `or-swarm` (parallel fan-out over OpenRouter free models), `kilo-subagent` (Kilo Code free-tier one-shot delegate), plus runbooks. |
+| `dsh-lite-cpp/` | **dsh-lite-cpp**: the Colibri-native C++20 execution harness — zero-trust sandbox, dual-lane router (in-process C ABI + HTTP `coli serve`), host-enforced payload gates, ledger.jsonl v2. See its README for the full architecture. |
+| `bench/h2h/` | Head-to-head bench vs the smolagents OSS harness on the same local model, judged by an independent referee proxy (F62–F73 flaw register). |
 
 ## Quick start
 
