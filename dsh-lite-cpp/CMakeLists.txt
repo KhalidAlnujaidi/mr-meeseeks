@@ -89,6 +89,27 @@ target_link_libraries(g4-run PRIVATE dshlite)
 add_executable(h2h-ours tests/h2h_ours.cpp)
 target_link_libraries(h2h-ours PRIVATE dshlite)
 
+# C ABI feasibility spike: in-process greedy decode through Colibri's
+# public segment/edge C ABI (libcolibri_segment_edge.a) — no coli serve,
+# no Python, no HTTP. Not a ctest member: needs the real OLMoE model dir.
+# Build the library first:  make -C ../colibri/c segment-edge-library
+set(COLIBRI_C_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../colibri/c"
+    CACHE PATH "Colibri C engine source dir (headers + build/segment)")
+set(COLIBRI_SEGMENT_LIB "${COLIBRI_C_DIR}/build/segment/libcolibri_segment_edge.a")
+if(EXISTS "${COLIBRI_SEGMENT_LIB}")
+  add_executable(abi-probe src/abi_probe.cpp)
+  target_include_directories(abi-probe PRIVATE "${COLIBRI_C_DIR}")
+  target_compile_options(abi-probe PRIVATE -Wall -Wextra -Werror)
+  find_library(OMP_LIB omp HINTS /opt/homebrew/opt/libomp/lib)
+  target_link_libraries(abi-probe PRIVATE "${COLIBRI_SEGMENT_LIB}" m)
+  if(OMP_LIB)
+    target_link_libraries(abi-probe PRIVATE "${OMP_LIB}")
+  endif()
+else()
+  message(STATUS "abi-probe disabled: ${COLIBRI_SEGMENT_LIB} not built yet "
+                 "(make -C colibri/c segment-edge-library)")
+endif()
+
 enable_testing()
 foreach(t IN ITEMS sanitizer spawner brain llm router ledger nudge stall f33_p1 g4_stress grammar)
   add_executable(test-${t} tests/test_${t}.cpp)
