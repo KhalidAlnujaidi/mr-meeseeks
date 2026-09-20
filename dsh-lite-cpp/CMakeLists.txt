@@ -105,6 +105,17 @@ if(EXISTS "${COLIBRI_SEGMENT_LIB}")
   if(OMP_LIB)
     target_link_libraries(abi-probe PRIVATE "${OMP_LIB}")
   endif()
+
+  # Native C ABI backend (AbiClient : ILlmPoster) — separate library so
+  # core dshlite never gains a Colibri link dependency. Same flags law.
+  add_library(dshlite-abi STATIC src/abi_client.cpp)
+  target_include_directories(dshlite-abi PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include" "${COLIBRI_C_DIR}")
+  target_compile_options(dshlite-abi PRIVATE -Wall -Wextra -Werror)
+  target_link_libraries(dshlite-abi PUBLIC dshlite "${COLIBRI_SEGMENT_LIB}" m)
+  if(OMP_LIB)
+    target_link_libraries(dshlite-abi PUBLIC "${OMP_LIB}")
+  endif()
 else()
   message(STATUS "abi-probe disabled: ${COLIBRI_SEGMENT_LIB} not built yet "
                  "(make -C colibri/c segment-edge-library)")
@@ -116,6 +127,13 @@ foreach(t IN ITEMS sanitizer spawner brain llm router ledger nudge stall f33_p1 
   target_link_libraries(test-${t} PRIVATE dshlite)
   add_test(NAME test-${t} COMMAND test-${t})
 endforeach()
+if(TARGET dshlite-abi)
+  add_executable(test-abi tests/test_abi.cpp)
+  target_link_libraries(test-abi PRIVATE dshlite-abi)
+  # Offline invariants always; live engine section only via ABI_MODEL_DIR
+  # (ctest stays hermetic — no model dir in the default environment).
+  add_test(NAME test-abi COMMAND test-abi)
+endif()
 add_executable(bench-sanitizer tests/bench_sanitizer.cpp)
 target_link_libraries(bench-sanitizer PRIVATE dshlite)
 add_test(NAME bench-sanitizer COMMAND bench-sanitizer)

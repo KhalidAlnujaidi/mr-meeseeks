@@ -15,6 +15,14 @@ src/spawner.cpp                 (fork/execve, scrubbed env, /tmp/meeseeks_<uuid>
 include/dshlite/llm_client.hpp  Module 3a: Colibri-only HTTP client
 src/llm_client.cpp              (cpp-httplib + OpenSSL, sync + async POST,
                                  verbatim --model-id, strict token totals)
+include/dshlite/abi_client.hpp  Module 3a-native: direct C ABI backend
+src/abi_client.cpp              (libcolibri_segment_edge.a in-process decode,
+src/abi_probe.cpp                 zero serve/Python/HTTP/IPC; opts.memory_
+                                 limit_bytes wired from C++; should_cancel
+                                 = host wall-clock firewall; per-call
+                                 sessions (F77); typed AbiCancelledError/
+                                 AbiContextOverflowError; honest in-process
+                                 usage counts; F80 no chat template delta)
 include/dshlite/router.hpp      Module 3c: Multi-Engine Local Router (Gap 1)
 src/router.cpp                  (role -> ordered (endpoint, model-id) pools,
                                  worker->worker fallback — never to the brain,
