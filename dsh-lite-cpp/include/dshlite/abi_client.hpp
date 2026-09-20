@@ -46,6 +46,7 @@
 #include <vector>
 
 #include "dshlite/llm_client.hpp"
+#include "dshlite/router.hpp"
 
 namespace dshlite {
 
@@ -127,6 +128,17 @@ class AbiClient : public ILlmPoster {
   /// tests; safe to call repeatedly and from multiple threads.
   static void ensureAdapters(const std::string& engineId);
 
+  /// Cumulative honest in-process usage across completed post() calls
+  /// (F83: feeds router totalUsage aggregation for mixed pools).
+  TokenUsage totalUsage() const override {
+    std::lock_guard<std::mutex> l(mu_);
+    return total_;
+  }
+  long requestCount() const override {
+    std::lock_guard<std::mutex> l(mu_);
+    return requests_;
+  }
+
   // Telemetry (valid after construction).
   std::uint32_t vocabSize() const { return vocabSize_; }
   std::uint32_t numLayers() const { return numLayers_; }
@@ -144,6 +156,17 @@ class AbiClient : public ILlmPoster {
   std::uint32_t stateWidth_ = 0;
   std::uint32_t maxContextTokens_ = 0;
   std::int32_t eosTokenId_ = -1;
+  mutable std::mutex mu_;  // guards total_/requests_ (F83 aggregation)
+  TokenUsage total_{};
+  long requests_ = 0;
 };
+
+/// Router injection point (F83/F85): builds the AbiFactory a
+/// RouterConfig needs for InProcessAbi entries. Lives in dshlite-abi so
+/// core dshlite never links Colibri. Entry mapping: modelDir verbatim,
+/// engineId = deriveFamily(modelId) (F84 — no hardcoded family),
+/// maxTokens/timeout from the entry, memoryLimitBytes wired to the
+/// native RAM boundary.
+RouterConfig::AbiFactory makeAbiBackendFactory();
 
 }  // namespace dshlite

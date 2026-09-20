@@ -104,11 +104,43 @@ void offlineSection() {
     try { throw AbiCancelledError("x"); } catch (const AbiError&) { base = true; }
     expect(base, "taxonomy: AbiCancelledError derives from AbiError");
   }
+
+  // Router factory (F84): entry mapping — a bogus modelDir cannot be
+  // used as a failure probe because the colibri engine open path calls
+  // exit() itself on missing config.json (observed). So the mapping is
+  // verified structurally here; the real factory open is exercised in
+  // the live section against the actual model dir.
+  {
+    RouterConfig::AbiFactory f = makeAbiBackendFactory();
+    expect(static_cast<bool>(f), "F84: makeAbiBackendFactory returns a usable factory");
+    expect(deriveFamily("olmoe-leaf") == "olmoe",
+           "F84: family derivation maps olmoe-leaf -> olmoe adapter id");
+  }
 }
 
 void liveSection(const std::string& modelDir) {
   using namespace dshlite;
   std::cout << "\n[live] ABI_MODEL_DIR=" << modelDir << " — opening real engine in-process\n";
+
+  // F84 end-to-end: the router factory builds a real in-process poster
+  // from an EngineEntry (deriveFamily -> adapter, memoryLimit wired).
+  {
+    RouterConfig::AbiFactory f = makeAbiBackendFactory();
+    EngineEntry e;
+    e.backend = EngineBackend::InProcessAbi;
+    e.modelDir = modelDir;
+    e.modelId = "olmoe-leaf";
+    e.maxTokens = 4;
+    e.timeout = std::chrono::seconds(300);
+    e.memoryLimitBytes = 8ull * 1024 * 1024 * 1024;
+    auto poster = f(e);
+    expect(poster != nullptr, "[live] F84: factory built a real AbiClient from EngineEntry");
+    auto r = poster->post({{"user", "The capital of France is"}});
+    expect(!r.content.empty() && r.usage.completionTokens == 4,
+           "[live] F84: factory-built poster decodes in-process");
+    expect(poster->totalUsage().completionTokens == 4 && poster->requestCount() == 1,
+           "[live] F83: AbiClient usage accounting feeds router aggregation");
+  }
 
   AbiConfig cfg;
   cfg.modelDir = modelDir;

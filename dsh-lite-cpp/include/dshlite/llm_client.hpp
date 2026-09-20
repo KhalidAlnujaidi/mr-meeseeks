@@ -170,6 +170,12 @@ class ILlmPoster {
     (void)rf;
     return post(messages);
   }
+  /// Cumulative usage across this poster's completed calls. Default
+  /// zero (fakes / backends without accounting); LlmClient and
+  /// AbiClient override with real mutex-guarded totals. The router
+  /// aggregates these across mixed HTTP/ABI pools.
+  virtual TokenUsage totalUsage() const { return {}; }
+  virtual long requestCount() const { return 0; }
 };
 
 class LlmClient : public ILlmPoster {
@@ -194,11 +200,11 @@ class LlmClient : public ILlmPoster {
   /// Non-blocking POST; exceptions surface on future::get().
   std::future<LlmResponse> postAsync(const std::vector<Message>& messages);
 
-  TokenUsage totalUsage() const {
+  TokenUsage totalUsage() const override {
     std::lock_guard<std::mutex> l(mu_);
     return total_;
   }
-  long requestCount() const {
+  long requestCount() const override {
     std::lock_guard<std::mutex> l(mu_);
     return requests_;
   }

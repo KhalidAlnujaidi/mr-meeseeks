@@ -133,6 +133,11 @@ if(TARGET dshlite-abi)
   # Offline invariants always; live engine section only via ABI_MODEL_DIR
   # (ctest stays hermetic — no model dir in the default environment).
   add_test(NAME test-abi COMMAND test-abi)
+
+  # In-process vs HTTP lane bench (manual, not ctest: needs the model +
+  # a serve engine for the http arm; runs sequentially per F70).
+  add_executable(abi-bench tests/abi_bench.cpp)
+  target_link_libraries(abi-bench PRIVATE dshlite-abi)
 endif()
 add_executable(bench-sanitizer tests/bench_sanitizer.cpp)
 target_link_libraries(bench-sanitizer PRIVATE dshlite)

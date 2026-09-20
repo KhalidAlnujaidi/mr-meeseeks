@@ -22,6 +22,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <functional>
 #include <future>
 #include <memory>
 #include <string>
@@ -36,6 +38,14 @@ enum class Role { Brain, Worker, Verifier };
 const char* roleName(Role r);
 /// Throws std::invalid_argument on unknown names.
 Role roleFromName(const std::string& name);
+
+/// Transport lane for an EngineEntry (mixed HTTP + in-process pools).
+enum class EngineBackend {
+  HttpColiServe,  ///< pooled LlmClient over HTTP to `coli serve` (default)
+  InProcessAbi,   ///< in-process C ABI decode via injected factory
+};
+
+const char* backendName(EngineBackend b);
 
 /// Family derivation (F3/G1.2): strip a trailing "-colibri", then take
 /// the prefix up to the first digit/dash/dot. "glm-5.3-flash-colibri"
@@ -71,15 +81,39 @@ struct EngineEntry {
   /// outcome, worker->worker fallthrough per F2). Default 120 s per the
   /// roadmap; 0 disables (read timeout falls back to `timeout`). NEVER
   /// a wall-clock cap: a 0.05 tok/s cold engine that keeps dripping
-  /// bytes is slow-but-alive, not stalled. LAST FIELD: tests brace-init
-  /// EngineEntry positionally (F18) — appending keeps them valid.
+  /// bytes is slow-but-alive, not stalled.
   std::chrono::milliseconds stallNoBytesMs{120000};
+  /// Mixed-lane routing (native C ABI integration): which transport
+  /// serves this entry. HttpColiServe builds a pooled LlmClient (the
+  /// original behavior, default); InProcessAbi builds the poster via
+  /// RouterConfig::abiFactory — the core router never links Colibri
+  /// (F83 isolation): ABI support is injected, not compiled in.
+  /// Appended AFTER stallNoBytesMs so positional brace-init stays valid
+  /// (F18 law: new fields always carry defaults).
+  EngineBackend backend = EngineBackend::HttpColiServe;
+  /// ABI entries ONLY: model weights directory (required; the entry's
+  /// routing identity is "abi:"+modelDir — F81, since ABI entries have
+  /// no endpoint). HTTP entries ignore this.
+  std::string modelDir;
+  /// ABI entries ONLY: wired into the engine's memory_limit_bytes —
+  /// native RAM boundary. 0 = adapter automatic budget.
+  std::uint64_t memoryLimitBytes = 0;
 };
 
 struct RouterConfig {
   std::vector<EngineEntry> brain;     ///< exactly the frontier engine(s)
   std::vector<EngineEntry> worker;    ///< heterogeneous leaf pool
   std::vector<EngineEntry> verifier;  ///< heterogeneous check pool
+  /// In-process ABI lane injection (F83 isolation): builds the poster
+  /// for one InProcessAbi entry. The core router never includes
+  /// abi_client.hpp / links Colibri — dshlite-abi provides
+  /// makeAbiBackendFactory(). An InProcessAbi entry with no factory
+  /// is a config-time invalid_argument (F85), never a dispatch surprise.
+  /// Signature: (modelDir, modelId, maxTokens, timeout, memoryLimitBytes)
+  /// -> owning poster; may throw AbiError (config-time, fail loud).
+  using AbiFactory =
+      std::function<std::unique_ptr<ILlmPoster>(const EngineEntry&)>;
+  AbiFactory abiFactory;
 };
 
 /// One routing attempt, for the ledger v2 `route` lines (Gap 3/4).
@@ -137,6 +171,12 @@ class ModelRouter {
   /// Live probe (G1.1): one throwaway request per entry verifying the
   /// endpoint answers its own model-id. Uses isolated clients, so probe
   /// traffic never pollutes totalUsage()/requestCount().
+  /// F82 (ABI entries): an in-process engine holds its weights resident
+  /// from construction; a probe cannot open a SECOND engine instance
+  /// (multi-GB duplication). ABI entries are reported ok=true with
+  /// detail "resident since construction" — the constructor itself was
+  /// the probe (it throws AbiError on any open failure). Documented,
+  /// never faked.
   struct ProbeResult {
     std::string endpoint;
     std::string modelId;
@@ -145,7 +185,8 @@ class ModelRouter {
   };
   std::vector<ProbeResult> probe();
 
-  /// Aggregates across every pooled client (mutex-guarded per client).
+  /// Aggregates across every pooled poster (mutex-guarded per client;
+  /// ABI entries contribute their honest in-process counts, F83).
   TokenUsage totalUsage() const;
   long requestCount() const;
 
@@ -165,11 +206,13 @@ class ModelRouter {
     }
     return 0;
   }
-  LlmClient& clientFor(Role role, size_t idx);
+  ILlmPoster& clientFor(Role role, size_t idx);
 
   RouterConfig cfg_;
-  /// Clients laid out [brain..., worker..., verifier...]; built once.
-  std::vector<std::unique_ptr<LlmClient>> clients_;
+  /// Posters laid out [brain..., worker..., verifier...]; built once.
+  /// Mixed lane: LlmClient for HTTP entries, factory-built AbiClient
+  /// for InProcessAbi entries — the router only sees ILlmPoster.
+  std::vector<std::unique_ptr<ILlmPoster>> clients_;
   size_t brainN_ = 0, workerN_ = 0;  ///< pool offsets
   std::vector<std::string> warnings_;
   /// Per-entry completed-turn counters (F14): warmup exemption state.

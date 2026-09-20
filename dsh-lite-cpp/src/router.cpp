@@ -30,6 +30,11 @@ std::string classify(const std::exception& ex) {
   // G2.1/F6: the stall marker wins over "transport" — a no-bytes liveness
   // abort is its own ledger vocabulary, never lumped with generic failures.
   if (m.find("stall-no-bytes") != std::string::npos) return "stall-no-bytes";
+  // Native ABI lane markers (abi_client.hpp fail-loud what() contracts):
+  // the wall-clock firewall and the F75 context preflight are their own
+  // outcomes so mixed pools route on typed facts, not message guesswork.
+  if (m.find("wall-clock firewall tripped") != std::string::npos) return "abi-cancelled";
+  if (m.find("context overflow:") != std::string::npos) return "abi-context-overflow";
   if (m.find("transport failure") != std::string::npos) return "transport";
   if (m.find("HTTP 404") != std::string::npos) return "http-404";
   if (m.find("HTTP 5") != std::string::npos) return "http-5xx";
@@ -38,16 +43,10 @@ std::string classify(const std::exception& ex) {
   return "error";
 }
 
-void validateEntry(const EngineEntry& e, const char* pool) {
-  if (e.endpoint.rfind("http://", 0) != 0 && e.endpoint.rfind("https://", 0) != 0)
-    throw std::invalid_argument(
-        std::string("router: ") + pool + " endpoint must start with http:// or https://: " + e.endpoint);
-  if (e.modelId.empty())
-    throw std::invalid_argument(
-        std::string("router: ") + pool + " entry " + e.endpoint +
-        " has empty modelId — the engine 404s anything but its verbatim --model-id (F3)");
-}
-
+/// F81 routing identity: HTTP entries are their host:port; ABI entries
+/// have no endpoint, so their identity is the weights directory (two
+/// in-process engines on the same model dir in one pool would be the
+/// same engine twice — dedup must see that).
 std::string hostPortOf(const std::string& endpoint) {
   // authority between scheme and first '/' — identity for dup checks.
   auto slash = endpoint.find('/');
@@ -58,7 +57,42 @@ std::string hostPortOf(const std::string& endpoint) {
   return endpoint.substr(start, end - start);
 }
 
+std::string entryIdentity(const EngineEntry& e) {
+  if (e.backend == EngineBackend::InProcessAbi) return "abi:" + e.modelDir;
+  return hostPortOf(e.endpoint);
+}
+
+void validateEntry(const EngineEntry& e, const char* pool) {
+  if (e.backend == EngineBackend::InProcessAbi) {
+    if (e.modelDir.empty())
+      throw std::invalid_argument(
+          std::string("router: ") + pool +
+          " InProcessAbi entry has empty modelDir — the native lane routes "
+          "by weights directory (F81)");
+    if (e.modelId.empty())
+      throw std::invalid_argument(
+          std::string("router: ") + pool + " entry abi:" + e.modelDir +
+          " has empty modelId — telemetry/ledger identity stays verbatim (F3)");
+    return;
+  }
+  if (e.endpoint.rfind("http://", 0) != 0 && e.endpoint.rfind("https://", 0) != 0)
+    throw std::invalid_argument(
+        std::string("router: ") + pool + " endpoint must start with http:// or https://: " + e.endpoint);
+  if (e.modelId.empty())
+    throw std::invalid_argument(
+        std::string("router: ") + pool + " entry " + e.endpoint +
+        " has empty modelId — the engine 404s anything but its verbatim --model-id (F3)");
+}
+
 }  // namespace
+
+const char* backendName(EngineBackend b) {
+  switch (b) {
+    case EngineBackend::HttpColiServe: return "http-coli-serve";
+    case EngineBackend::InProcessAbi: return "in-process-abi";
+  }
+  return "unknown";
+}
 
 const char* roleName(Role r) {
   switch (r) {
@@ -103,14 +137,17 @@ ModelRouter::ModelRouter(RouterConfig cfg) : cfg_(std::move(cfg)) {
 
   // G1.3: the brain endpoint is reachable only by role brain — reject
   // it appearing in any leaf pool at CONFIG time, not dispatch time.
+  // F81: identity is entryIdentity — host:port for HTTP, abi:modelDir
+  // for in-process entries (an ABI brain and an ABI worker on the same
+  // weights dir would be the same engine serving two roles: rejected).
   std::set<std::string> brainHosts;
-  for (const auto& e : cfg_.brain) brainHosts.insert(hostPortOf(e.endpoint));
+  for (const auto& e : cfg_.brain) brainHosts.insert(entryIdentity(e));
   for (const char* poolName : {"worker", "verifier"}) {
     const auto& pool = (poolName == std::string("worker")) ? cfg_.worker : cfg_.verifier;
     for (const auto& e : pool) {
-      if (brainHosts.count(hostPortOf(e.endpoint)))
+      if (brainHosts.count(entryIdentity(e)))
         throw std::invalid_argument(
-            std::string("router: brain endpoint ") + e.endpoint + " appears in the " +
+            std::string("router: brain endpoint ") + entryIdentity(e) + " appears in the " +
             poolName + " pool — the brain is never a fallback target (F2)");
     }
   }
@@ -121,9 +158,23 @@ ModelRouter::ModelRouter(RouterConfig cfg) : cfg_(std::move(cfg)) {
         std::pair{&cfg_.brain, "brain"}}) {
     std::set<std::string> seen;
     for (const auto& e : *pool) {
-      if (!seen.insert(hostPortOf(e.endpoint)).second)
+      if (!seen.insert(entryIdentity(e)).second)
         throw std::invalid_argument(
-            std::string("router: duplicate endpoint in ") + name + " pool: " + e.endpoint);
+            std::string("router: duplicate endpoint in ") + name + " pool: " + entryIdentity(e));
+    }
+  }
+
+  // F85: every InProcessAbi entry needs the injected factory — checked
+  // at config time so a missing lane is never a mid-dispatch surprise.
+  for (const auto& [pool, name] :
+       {std::pair{&cfg_.worker, "worker"}, std::pair{&cfg_.verifier, "verifier"},
+        std::pair{&cfg_.brain, "brain"}}) {
+    for (const auto& e : *pool) {
+      if (e.backend == EngineBackend::InProcessAbi && !cfg_.abiFactory)
+        throw std::invalid_argument(
+            std::string("router: ") + name + " pool has an InProcessAbi entry (" +
+            e.modelDir + ") but RouterConfig::abiFactory is not set — "
+            "inject dshlite-abi's makeAbiBackendFactory() (F85)");
     }
   }
 
@@ -143,18 +194,27 @@ ModelRouter::ModelRouter(RouterConfig cfg) : cfg_(std::move(cfg)) {
         "router: verifier pool has < 2 distinct model families — worker and "
         "verifier may share failure modes (G1.2)");
 
-  // Build clients once: [brain..., worker..., verifier...].
+  // Build posters once: [brain..., worker..., verifier...]. Mixed lane:
+  // HTTP entries get a pooled LlmClient; InProcessAbi entries go through
+  // the injected factory (constructor = engine open = fail-loud probe).
   brainN_ = cfg_.brain.size();
   workerN_ = cfg_.worker.size();
   const size_t total = brainN_ + workerN_ + cfg_.verifier.size();
   clients_.reserve(total);
   turnCounters_.reserve(total);
-  for (const auto& e : cfg_.brain)
-    clients_.push_back(std::make_unique<LlmClient>(toConfig(e)));
-  for (const auto& e : cfg_.worker)
-    clients_.push_back(std::make_unique<LlmClient>(toConfig(e)));
-  for (const auto& e : cfg_.verifier)
-    clients_.push_back(std::make_unique<LlmClient>(toConfig(e)));
+  auto buildOne = [this](const EngineEntry& e) {
+    if (e.backend == EngineBackend::InProcessAbi) {
+      auto poster = cfg_.abiFactory(e);  // throws AbiError on open failure
+      if (!poster)
+        throw std::invalid_argument(
+            "router: abiFactory returned null for " + e.modelDir);
+      return poster;
+    }
+    return std::unique_ptr<ILlmPoster>(new LlmClient(toConfig(e)));
+  };
+  for (const auto& e : cfg_.brain) clients_.push_back(buildOne(e));
+  for (const auto& e : cfg_.worker) clients_.push_back(buildOne(e));
+  for (const auto& e : cfg_.verifier) clients_.push_back(buildOne(e));
   for (size_t i = 0; i < total; ++i)
     turnCounters_.push_back(std::make_unique<std::atomic<long>>(0));
 }
@@ -168,7 +228,7 @@ const std::vector<EngineEntry>& ModelRouter::poolFor(Role role) const {
   throw std::invalid_argument("router: bad role");
 }
 
-LlmClient& ModelRouter::clientFor(Role role, size_t idx) {
+ILlmPoster& ModelRouter::clientFor(Role role, size_t idx) {
   return *clients_.at(poolOffset_(role) + idx);
 }
 
@@ -200,7 +260,15 @@ RoutedResponse ModelRouter::postImpl_(Role role,
   // exhausted-pool throw must cite the grammar, not a generic error.
   long grammarRefusals = 0;
   for (size_t i = 0; i < pool.size(); ++i) {
-    RouteAttempt att{pool[i].endpoint, pool[i].modelId, "", ""};
+    // HTTP entries keep their verbatim endpoint URL in attempts/servedBy
+    // (existing contract). ABI entries have no URL — F81: their identity
+    // is "abi:<modelDir>" so ledger route lines stay unambiguous in
+    // mixed pools. Dedup/overlap checks use entryIdentity() separately.
+    const std::string identity =
+        pool[i].backend == EngineBackend::InProcessAbi
+            ? entryIdentity(pool[i])
+            : pool[i].endpoint;
+    RouteAttempt att{identity, pool[i].modelId, "", ""};
     const long turnsSeen = turnCounters_[poolOffset_(role) + i]->load();
     try {
       LlmResponse resp = rf ? clientFor(role, i).postConstrained(messages, *rf)
@@ -224,7 +292,7 @@ RoutedResponse ModelRouter::postImpl_(Role role,
       out.response = std::move(resp);
       att.outcome = "ok";
       out.attempts.push_back(std::move(att));
-      out.servedBy = pool[i].endpoint;
+      out.servedBy = identity;
       out.modelId = pool[i].modelId;
       return out;
     } catch (const LlmStallError& e) {
@@ -286,6 +354,14 @@ std::vector<ModelRouter::ProbeResult> ModelRouter::probe() {
   const std::vector<Message> ping = {{"user", "ping"}};
   for (const auto* pool : {&cfg_.brain, &cfg_.worker, &cfg_.verifier}) {
     for (const auto& e : *pool) {
+      // F82: ABI entries are resident since construction — the engine
+      // open WAS the probe (fail-loud on failure). A second open would
+      // duplicate multi-GB weights; we report honestly instead.
+      if (e.backend == EngineBackend::InProcessAbi) {
+        results.push_back(ProbeResult{entryIdentity(e), e.modelId, true,
+                                      "resident since construction (in-process ABI, F82)"});
+        continue;
+      }
       ProbeResult pr{e.endpoint, e.modelId, false, ""};
       try {
         // Isolated client: probe traffic never touches pooled totals.

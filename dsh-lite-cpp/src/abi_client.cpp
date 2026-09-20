@@ -335,7 +335,30 @@ LlmResponse AbiClient::post(const std::vector<Message>& messages) {
                        std::chrono::steady_clock::now() - start)
                        .count();
   // No wire on this lane: lastByte/maxIdle stay -1 (never fabricated).
+
+  // F83: cumulative honest accounting (mirrors LlmClient::postImpl).
+  {
+    std::lock_guard<std::mutex> l(mu_);
+    total_.promptTokens += resp.usage.promptTokens;
+    total_.completionTokens += resp.usage.completionTokens;
+    total_.totalTokens += resp.usage.totalTokens;
+    ++requests_;
+  }
   return resp;
+}
+
+RouterConfig::AbiFactory makeAbiBackendFactory() {
+  return [](const EngineEntry& e) -> std::unique_ptr<ILlmPoster> {
+    AbiConfig cfg;
+    cfg.modelDir = e.modelDir;
+    // F84: adapter family derived from the verbatim model-id —
+    // "olmoe-leaf"/"olmoe-colibri" -> "olmoe"; never hardcoded.
+    cfg.engineId = deriveFamily(e.modelId);
+    cfg.maxTokens = e.maxTokens;
+    cfg.timeout = e.timeout;
+    cfg.memoryLimitBytes = e.memoryLimitBytes;  // 0 = adapter automatic
+    return std::make_unique<AbiClient>(std::move(cfg));
+  };
 }
 
 }  // namespace dshlite

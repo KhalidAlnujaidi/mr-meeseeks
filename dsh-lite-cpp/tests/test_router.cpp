@@ -393,6 +393,164 @@ int main() {
     olmoeWorker2.stop();
   }
 
+  // 12. Mixed-lane routing (native C ABI integration, F81-F85): ABI
+  // entries via an INJECTED fake factory — the core router links no
+  // Colibri; the real factory (makeAbiBackendFactory) is covered by
+  // test-abi's live section. The fake mirrors AbiClient's typed-failure
+  // what() contracts so classify() exercises the real markers.
+  {
+    struct FakeAbiPoster : ILlmPoster {
+      std::string reply, failMarker;  // empty marker => success
+      std::atomic<long> hits{0};
+      TokenUsage usage{};
+      FakeAbiPoster(std::string r, std::string fm)
+          : reply(std::move(r)), failMarker(std::move(fm)) {}
+      LlmResponse post(const std::vector<Message>&) override {
+        hits.fetch_add(1);
+        if (!failMarker.empty()) throw std::runtime_error(failMarker);
+        LlmResponse resp;
+        resp.content = reply;
+        resp.usage = usage;
+        return resp;
+      }
+      TokenUsage totalUsage() const override { return usage; }
+      long requestCount() const override { return hits.load(); }
+    };
+    std::vector<FakeAbiPoster*> built;
+    auto fakeFactory = [&built](const std::string& reply,
+                                const std::string& marker, long pt, long ct) {
+      return RouterConfig::AbiFactory(
+          [&built, reply, marker, pt, ct](const EngineEntry&) {
+            auto p = std::make_unique<FakeAbiPoster>(reply, marker);
+            p->usage.promptTokens = pt;
+            p->usage.completionTokens = ct;
+            p->usage.totalTokens = pt + ct;
+            built.push_back(p.get());
+            return std::unique_ptr<ILlmPoster>(std::move(p));
+          });
+    };
+    auto abiEntry = [](const std::string& dir, const std::string& id) {
+      EngineEntry e;
+      e.backend = EngineBackend::InProcessAbi;
+      e.modelDir = dir;
+      e.modelId = id;
+      return e;
+    };
+
+    StubEngine httpBrain, httpWorker;
+    httpBrain.start("glm-5.2-colibri", 18400, "http brain");
+    httpWorker.start("qwen3.6-colibri", 18410, "http worker");
+    check(httpBrain.port != -1 && httpWorker.port != -1, "12: stubs up");
+
+    // 12.1 ABI brain + HTTP worker/verifier: role dispatch crosses lanes.
+    {
+      RouterConfig cfg;
+      cfg.brain = {abiEntry("/models/olmoe", "olmoe-leaf")};
+      cfg.worker = {entry(httpWorker)};
+      cfg.verifier = {entry(httpWorker)};
+      cfg.abiFactory = fakeFactory("abi brain reply", "", 11, 7);
+      ModelRouter r(cfg);
+      auto b = r.post(Role::Brain, {{"user", "think"}});
+      check(b.response.content == "abi brain reply" &&
+                b.servedBy == "abi:/models/olmoe" && b.modelId == "olmoe-leaf",
+            "12.1: ABI brain serves in-process; servedBy = abi:<modelDir> (F81)");
+      check(b.attempts.size() == 1 && b.attempts[0].outcome == "ok" &&
+                b.attempts[0].endpoint == "abi:/models/olmoe",
+            "12.1: attempt log carries ABI identity");
+      auto w = r.post(Role::Worker, {{"user", "work"}});
+      check(w.servedBy == httpWorker.url() && w.response.content == "http worker",
+            "12.1: HTTP worker lane unaffected by ABI brain");
+      // F83: router aggregation spans both lanes (11+7 abi, 10+5 http stub).
+      check(r.totalUsage().totalTokens == 33 && r.requestCount() == 2,
+            "12.1/F83: totalUsage aggregates ABI + HTTP posters");
+      // F82: probe reports ABI entries as resident, no second engine open.
+      auto probes = r.probe();
+      check(probes.size() == 3 && probes[0].ok &&
+                probes[0].detail.find("resident") != std::string::npos &&
+                probes[0].endpoint == "abi:/models/olmoe",
+            "12.1/F82: ABI probe = resident-since-construction (never faked)");
+      httpBrain.stop();
+      httpWorker.stop();
+    }
+
+    // 12.2 Mixed fallback: ABI worker fails on the firewall marker ->
+    // falls through to the HTTP worker (F2 seamless across lanes).
+    {
+      StubEngine wk2;
+      wk2.start("olmoe-colibri", 18420, "http backup");
+      // F2 brain isolation: the brain stub must NOT double as a worker
+      // entry (config-time law), so the fallback target is a distinct
+      // stub from the brain.
+      StubEngine br2;
+      br2.start("glm-5.2-colibri", 18430, "brain2");
+      RouterConfig cfg;
+      cfg.brain = {entry(br2)};
+      cfg.worker = {abiEntry("/models/olmoe", "olmoe-leaf"), entry(wk2)};
+      cfg.verifier = {entry(wk2)};
+      cfg.abiFactory = fakeFactory("", "wall-clock firewall tripped during decode loop (step 3)", 0, 0);
+      ModelRouter r(cfg);
+      auto w = r.post(Role::Worker, {{"user", "work"}});
+      check(w.servedBy == wk2.url() && w.response.content == "http backup",
+            "12.2/F2: ABI worker firewall abort falls through to HTTP worker");
+      check(w.attempts.size() == 2 && w.attempts[0].outcome == "abi-cancelled" &&
+                w.attempts[0].endpoint == "abi:/models/olmoe" &&
+                w.attempts[1].outcome == "ok",
+            "12.2: attempt trail = abi-cancelled then ok (typed classification)");
+      br2.stop();
+      wk2.stop();
+    }
+
+    // 12.3 context-overflow marker classifies as its own outcome and
+    // escalates when the pool is ABI-only.
+    {
+      StubEngine br3;
+      br3.start("glm-5.2-colibri", 18440, "brain3");
+      RouterConfig cfg;
+      cfg.brain = {entry(br3)};
+      cfg.worker = {abiEntry("/models/olmoe", "olmoe-leaf")};
+      cfg.verifier = {abiEntry("/models/qwen", "qwen3.6-colibri")};
+      cfg.abiFactory = fakeFactory("", "context overflow: need 9000 tokens, adapter max 4096", 0, 0);
+      ModelRouter r(cfg);
+      check(throwsWith([&] { r.post(Role::Worker, {{"user", "x"}}); }, "pool exhausted"),
+            "12.3: ABI-only pool exhausted escalates (F2, never brain)");
+      br3.stop();
+    }
+
+    // 12.4 Config-time laws (F81/F85): missing factory, missing modelDir,
+    // duplicate ABI identity, ABI brain identity leaked into worker pool.
+    {
+      StubEngine br4, wk4;
+      br4.start("glm-5.2-colibri", 18450, "b");
+      wk4.start("qwen3.6-colibri", 18460, "w");
+      RouterConfig base;
+      base.brain = {entry(br4)};
+      base.worker = {entry(wk4), abiEntry("/models/olmoe", "olmoe-leaf")};
+      base.verifier = {entry(wk4)};
+      check(throwsWith([&] { ModelRouter r(base); }, "abiFactory is not set"),
+            "12.4/F85: ABI entry without factory rejected at CONFIG time");
+      RouterConfig noDir = base;
+      noDir.abiFactory = fakeFactory("x", "", 0, 0);
+      noDir.worker = {entry(wk4), abiEntry("", "olmoe-leaf")};
+      check(throwsWith([&] { ModelRouter r(noDir); }, "empty modelDir"),
+            "12.4/F81: ABI entry without modelDir rejected");
+      RouterConfig dup = base;
+      dup.abiFactory = fakeFactory("x", "", 0, 0);
+      dup.worker = {entry(wk4), abiEntry("/models/olmoe", "olmoe-leaf"),
+                    abiEntry("/models/olmoe", "olmoe-leaf2")};
+      check(throwsWith([&] { ModelRouter r(dup); }, "duplicate endpoint"),
+            "12.4/F81: same modelDir twice in one pool rejected");
+      RouterConfig leak = base;
+      leak.abiFactory = fakeFactory("x", "", 0, 0);
+      leak.brain = {abiEntry("/models/olmoe", "olmoe-brain")};
+      leak.worker = {entry(wk4), abiEntry("/models/olmoe", "olmoe-leaf")};
+      check(throwsWith([&] { ModelRouter r(leak); }, "never a fallback target"),
+            "12.4/F2: ABI brain identity in worker pool rejected");
+      br4.stop();
+      wk4.stop();
+    }
+    check(built.size() >= 1, "12: factory actually built ABI posters");
+  }
+
   std::cout << (failures == 0 ? "ROUTER PASS\n" : "ROUTER FAIL\n");
   return failures == 0 ? 0 : 1;
 }
