@@ -1,0 +1,23 @@
+{
+ "harness": "smolagents-1.26-CodeAgent",
+ "results": [
+  {
+   "task": "T1",
+   "wall_ms": 1049367,
+   "error": "AgentGenerationError: Error in generating model output:\nError code: 500 - {'error': {'message': 'The colibri engine failed to process the request.', 'type': 'server_error', 'param': None, 'code': 'engine_error'}}",
+   "final": null
+  },
+  {
+   "task": "T2",
+   "wall_ms": 733420,
+   "error": "AgentGenerationError: Error in generating model output:\nError code: 500 - {'error': {'message': 'The colibri engine failed to process the request.', 'type': 'server_error', 'param': None, 'code': 'engine_error'}}",
+   "final": null
+  },
+  {
+   "task": "T3",
+   "wall_ms": 1349492,
+   "error": "AgentGenerationError: Error in generating model output:\nConnection error.",
+   "final": null
+  }
+ ]
+}
