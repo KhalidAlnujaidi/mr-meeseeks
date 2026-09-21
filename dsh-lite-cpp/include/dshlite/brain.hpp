@@ -9,6 +9,7 @@
 #include <chrono>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -88,6 +89,10 @@ class BrainLoop {
     VerifyOutcome verify;
     GateVerdict gate;
     int spawns = 0;  ///< actual subprocess executions (0 on every refuse)
+    /// F72 promotion: how many retries asked the host for a NEW payload
+    /// (as opposed to replaying the old one). Round-1 passes and
+    /// re-solicited passes are different claims — report them apart.
+    int resolicits = 0;
     /// F72 layer 2 outcome. evaluated=false => no postcondition declared.
     PostconditionResult postcondition;
   };
@@ -108,6 +113,40 @@ class BrainLoop {
   using RetryPlanner =
       std::function<RetryScope(int round, nlohmann::json& payload)>;
 
+  /// What went wrong on an attempt — the feedback a re-solicitation
+  /// needs. Layer-aware so the host can tell "it ran and produced the
+  /// wrong artifact" (fixable by trying a different command) from "it
+  /// never ran" (an exit failure) and "the gate refused it".
+  struct FailureFeedback {
+    int attempt = 0;              ///< 1-based attempt that just failed
+    bool exitOk = false;          ///< layer 1
+    bool postconditionOk = false; ///< layer 2 (true when not evaluated)
+    bool postconditionEvaluated = false;
+    std::string detail;           ///< postcondition/verify detail
+    std::string lastOutput;       ///< sanitized worker stdout+stderr (capped)
+  };
+
+  /// F72 promotion, part 2 (P3-b): host-driven RE-SOLICITATION.
+  ///
+  /// Called after a verification failure, BEFORE the retry is granted.
+  /// The host uses the feedback to ask the model again and returns a NEW
+  /// payload; returning nullopt means "no new payload — replay the old
+  /// one" (the pre-promotion behavior).
+  ///
+  /// WHY A HOOK AND NOT AN INLINE MODEL CALL: runGatedTask must stay
+  /// model-free. This loop owns gating, isolation, verification and the
+  /// cap ladder; the Brain owns strategy and the model. Calling
+  /// solicitToolPayload from in here would invert that layering and make
+  /// the safety loop depend on a live LLM. The hook is the same idiom as
+  /// JudgeHook / RetryPlanner, and it is what bench/h2h and
+  /// golem_runner.cpp already do by hand — this promotes it.
+  ///
+  /// The I6/I7 caps are NOT bypassed: a re-solicited payload still
+  /// passes the gate and still consumes a retry round. Attempts are
+  /// capped independently by opt.maxResolicits (default 0 = off).
+  using ReSolicitHook = std::function<std::optional<nlohmann::json>(
+      const FailureFeedback& feedback)>;
+
   /// G2.4 host loop: gate -> spawn -> verify -> retry/nudge caps.
   /// Sequencing law (payload_gate.hpp call-site contract): NO payload
   /// reaches SwarmSpawner::spawn unchecked; DESTRUCTIVE_PROPOSE_ONLY
@@ -122,11 +161,21 @@ class BrainLoop {
   /// "verified-exit-only" — honest about being layer 1 only, never a
   /// silent upgrade. Existing callers pass no hook and keep their
   /// behavior with the honest label.
+  ///
+  /// F72 promotion part 2: when `resolicit` is supplied (and
+  /// maxResolicits > 0), a verification failure asks the host for a NEW
+  /// payload via the feedback instead of blindly replaying the old one.
+  /// Each re-solicited attempt still passes the gate and still consumes
+  /// an I6 retry round, so the cap ladder stays authoritative. The retry
+  /// taskId for attempt N is "<taskId>#rN" — reuses ledger task identity
+  /// without colliding across retries (F55).
   TaskReport runGatedTask(const std::string& taskId,
                           const nlohmann::json& payload,
                           const SpawnOptions& opt,
                           RetryPlanner planner = {},
-                          PostconditionHook postcondition = {});
+                          PostconditionHook postcondition = {},
+                          ReSolicitHook resolicit = {},
+                          int maxResolicits = 0);
 
   /// G2.4 solicit: ask the model for a tool payload under a
   /// response_format grammar (built from `tools`), then STRICT-parse

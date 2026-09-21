@@ -178,12 +178,18 @@ BrainLoop::TaskReport BrainLoop::runGatedTask(const std::string& taskId,
                                               const nlohmann::json& payload,
                                               const SpawnOptions& opt,
                                               RetryPlanner planner,
-                                              PostconditionHook postcondition) {
+                                              PostconditionHook postcondition,
+                                              ReSolicitHook resolicit,
+                                              int maxResolicits) {
   TaskReport rep;
   rep.taskId = taskId;
   NudgeState& st = nudgeState(taskId);
   nlohmann::json current = payload;
   const RetryScope defaultScope = RetryScope::FullScope;
+  // Sanitized worker output from the most recent attempt — the feedback
+  // a re-solicitation needs (capped; Module 1 already sanitized it).
+  std::string lastOutput;
+  int attempt = 0;
 
   while (true) {
     // G2.4 step 1: pre-execution gate BEFORE any spawn (call-site law).
@@ -235,9 +241,12 @@ BrainLoop::TaskReport BrainLoop::runGatedTask(const std::string& taskId,
       return rep;
     }
     ++rep.spawns;
+    ++attempt;
 
     // G2.6: local exit-code verification (sycophancy-immune, F9).
     rep.verify = verifyViaSpawn(sr);
+    // Retain the sanitized worker output for re-solicitation feedback.
+    lastOutput = (sr.sanitizedStdout + sr.sanitizedStderr).substr(0, 800);
 
     // F72 layer 2 (promotion): the host-declared artifact postcondition
     // must be evaluated in the workspace BEFORE cleanup — the workspace
@@ -334,6 +343,55 @@ BrainLoop::TaskReport BrainLoop::runGatedTask(const std::string& taskId,
       emit(ev);
       return rep;
     }
+    // F72 promotion part 2 (P3-b): the caps have GRANTED a retry. Before
+    // replaying the old payload blindly, give the host a chance to ask
+    // the model again with the failure as feedback. The gate still
+    // re-validates whatever comes back, and `current` only advances on a
+    // well-formed payload — a host returning garbage cannot bypass the
+    // gate (it will be reported as gate-refused on the next iteration).
+    if (resolicit && rep.resolicits < maxResolicits) {
+      FailureFeedback fb;
+      fb.attempt = attempt;
+      fb.exitOk = rep.verify.pass;
+      fb.postconditionOk = rep.postcondition.pass;
+      fb.postconditionEvaluated = rep.postcondition.evaluated;
+      fb.detail = rep.postcondition.evaluated ? rep.postcondition.detail
+                                              : rep.verify.detail;
+      fb.lastOutput = lastOutput;
+      nlohmann::json fresh;
+      bool gotFresh = false;
+      try {
+        const std::optional<nlohmann::json> maybe = resolicit(fb);
+        if (maybe.has_value()) {
+          fresh = *maybe;
+          gotFresh = true;
+        }
+      } catch (const std::exception& e) {
+        // A throwing host hook must not corrupt the cap ladder: log it,
+        // keep the old payload, and let the retry proceed (or stop).
+        LedgerEvent ev;
+        ev.type = "nudge"; ev.taskId = taskId; ev.role = "worker";
+        ev.nudgeDepth = st.nudgeDepth;
+        ev.detail = std::string("re-solicit hook threw: ") + e.what();
+        emit(ev);
+      }
+      if (gotFresh) {
+        current = std::move(fresh);
+        ++rep.resolicits;
+        LedgerEvent ev;
+        ev.type = "nudge"; ev.taskId = taskId; ev.role = "worker";
+        ev.nudgeDepth = st.nudgeDepth;
+        ev.detail = "re-solicited new payload after verify-fail (attempt " +
+                    std::to_string(fb.attempt) + ", layer2=" +
+                    (fb.postconditionEvaluated
+                         ? (fb.postconditionOk ? "pass" : "FAIL")
+                         : "none") +
+                    ")";
+        emit(ev);
+        continue;  // skip the planner: the host rewrote the payload
+      }
+    }
+
     LedgerEvent ev;
     ev.type = "nudge"; ev.taskId = taskId; ev.role = "worker";
     ev.nudgeDepth = st.nudgeDepth;

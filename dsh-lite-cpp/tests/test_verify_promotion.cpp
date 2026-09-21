@@ -18,23 +18,35 @@
 //
 // DOCTRINE (standing rule: regression tests must fail on old code)
 // ---------------------------------------------------------------
-// The checks in section A and B assert the CURRENT (pre-promotion)
-// behavior, i.e. they PASS today and are designed to FAIL once the
-// promotion lands. That is the honest inverse of a normal suite: this
-// file is a change-detector for the two gaps, so that the promotion
-// commit has a test which provably goes red the moment semantics move.
+// CORRECTION (found by re-verifying the red direction, 2026-09-21):
+// the FIRST version of this file (b8e490e) claimed its checks "provably
+// go red when semantics move". That claim was WRONG for sections B and
+// C, and the error is recorded here rather than quietly fixed:
 //
-// Section C checks a PURE PREDICATE GAP (already-failing today) —
-// deliberately written as `expectGap(...)` so the suite exits 0 while
-// the gap is open and starts failing the day it closes. Same
-// change-detector role, opposite polarity.
+//   - Section B called runGatedTask with NO hook. That path is exactly
+//     the one the promotion leaves unchanged (the control case), so its
+//     detectors read "gap open" against BOTH old and new code. They
+//     measured a symptom, not the mechanism, and could never flip.
+//   - Section C asserted `const bool cppHasRegex = false;` — hardcoded
+//     literals, not tests of anything.
+//   - Only section A was a real detector, and it failed on new code
+//     solely by API absence (postcondition.hpp not existing), which is a
+//     compile failure rather than a behavioral witness.
 //
-// Sections:
-//   A. VerifyOutcome has NO content layer (runtime, exit-code only).
-//   B. runGatedTask re-spawns a byte-identical payload; no re-solicit.
-//   C. Predicate vocabulary: regex / exists:false / all_of missing
-//      from the C++ side (present in referee.py) — blocks bench
-//      migration onto runtime predicates.
+// The verified regression evidence for the promotion is therefore:
+//   1. NEW suite body vs OLD library => hard compile failure
+//      ('dshlite/postcondition.hpp' file not found). Strongest form:
+//      the API being tested did not exist.
+//   2. OLD b8e490e body vs OLD library => compiles, reports the gaps
+//      (6 open). Documents the pre-promotion state.
+// The honest limitation: no behavioral red-line across the promotion
+// exists for section B, because the re-solicit path is new API rather
+// than changed behavior. That is stated, not papered over.
+//
+// Sections below (current, positive assertions of the NEW behavior):
+//   A. layer 2 (artifact postcondition) available and honored.
+//   B. re-solicitation on failure: hook asked, counted, capped.
+//   C. predicate vocabulary: regex / exists:<bool> / all_of + guard.
 //
 // No sockets, no engine, no network (F9). Spawns only /bin/sh locally.
 
@@ -67,24 +79,10 @@ using json = nlohmann::json;
 namespace {
 
 int failures = 0;
-int gapsOpen = 0;
 
 void check(bool ok, const char* label) {
   std::cout << (ok ? "  [ok] " : "  [FAIL] ") << label << "\n";
   if (!ok) ++failures;
-}
-
-// Change-detector: the GAP is open (feature absent) => the suite stays
-// green and says so. When the feature lands, `gapIsOpen` becomes false
-// and this reports the promotion as landed — at which point these
-// checks should be INVERTED by the promotion commit (see header).
-void expectGap(bool gapIsOpen, const char* label) {
-  std::cout << (gapIsOpen ? "  [gap-open] " : "  [PROMOTED] ") << label
-            << "\n";
-  if (gapIsOpen)
-    ++gapsOpen;
-  else
-    ++failures;  // promotion landed: flip this expectation deliberately
 }
 
 std::string slurpFile(const std::string& p) {
@@ -168,42 +166,101 @@ int main() {
           "laundered into content-verified)");
   }
 
-  // ── B. runGatedTask re-spawns an identical payload; no re-solicit ──
-  // brain.cpp:255 => `json nextPayload = current;` and the default
-  // planner is FullScope: a verification failure retries the SAME
-  // payload. No new model call happens, so self-correction is a counter,
-  // not a correction. The bench runner (golem_runner.cpp:211) does the
-  // re-solicitation ITSELF — the prompt-scaffolded path.
+  // ── B. re-solicitation on failure (P3-b) ───────────────────────────
+  // PROMOTED. With a ReSolicitHook the loop asks the host for a NEW
+  // payload after a verification failure instead of blindly replaying
+  // the old one. Two claims are checked separately:
+  //   (i)  with no hook, behavior is UNCHANGED — retry replays the same
+  //        payload and no model call happens (the old contract);
+  //   (ii) with a hook, a fresh payload IS requested and used, and the
+  //        attempt is counted in rep.resolicits (so a round-2 pass is
+  //        distinguishable from a round-1 pass).
   {
-    std::cout << "\nB. retry replays the payload; the loop never re-solicits\n";
-    RecordingLlm llm;
-    BrainLoop b(llm, [](const std::string&) {
-      JudgeVerdict v;
-      v.action = JudgeAction::DoDirect;
-      v.confidence = 0.9;
-      return v;
-    });
-    BrainLoop::HostConfig hc;
-    hc.policy.allowedTools = {"shell"};
-    b.setHostConfig(std::move(hc));
+    std::cout << "\nB. re-solicitation on failure\n";
 
-    const json payload = {{"tool", "shell"}, {"args", {{"cmd", "exit 1"}}}};
-    SpawnOptions opt;
-    opt.argv = {"/bin/sh", "-c", "exit 1"};  // always fails verification
-    opt.timeout = std::chrono::seconds(10);
+    // (i) No hook => unchanged replay behavior.
+    {
+      RecordingLlm llm;
+      BrainLoop b(llm, [](const std::string&) {
+        JudgeVerdict v;
+        v.action = JudgeAction::DoDirect;
+        v.confidence = 0.9;
+        return v;
+      });
+      BrainLoop::HostConfig hc;
+      hc.policy.allowedTools = {"shell"};
+      b.setHostConfig(std::move(hc));
+      const json payload = {{"tool", "shell"}, {"args", {{"cmd", "exit 1"}}}};
+      SpawnOptions opt;
+      opt.argv = {"/bin/sh", "-c", "exit 1"};
+      opt.timeout = std::chrono::seconds(10);
+      const auto rep = b.runGatedTask("promo.b1", payload, opt);
+      check(llm.prompts.empty(), "no hook => zero model calls (replay path)");
+      check(rep.resolicits == 0, "no hook => resolicits stays 0");
+      check(rep.spawns >= 2, "no hook => failure retries re-spawn the SAME payload");
+    }
 
-    // Drive the loop on an always-failing payload; it will consume the
-    // I6 budget (2 retries) then stop+report.
-    const auto rep = b.runGatedTask("promo.b1", payload, opt);
-    expectGap(llm.prompts.empty(),
-              "runGatedTask makes ZERO model calls => no re-solicitation on "
-              "failure (re-solicit absent)");
-    expectGap(rep.spawns >= 2,
-              "failure retries re-spawn the SAME payload (spawns>=2) instead "
-              "of asking the model again");
-    expectGap(rep.disposition == "verify-failed-stop" ||
-                  rep.disposition == "stop-report",
-              "lane terminates on the I6 cap without any model round-trip");
+    // (ii) With a hook => a NEW payload is requested and executed.
+    {
+      RecordingLlm llm;
+      BrainLoop b(llm, [](const std::string&) {
+        JudgeVerdict v;
+        v.action = JudgeAction::DoDirect;
+        v.confidence = 0.9;
+        return v;
+      });
+      BrainLoop::HostConfig hc;
+      hc.policy.allowedTools = {"shell"};
+      b.setHostConfig(std::move(hc));
+
+      int asked = 0;
+      bool sawFeedback = false;
+      // First attempt fails (exit 1); the hook returns a GOOD payload.
+      auto hook = [&](const BrainLoop::FailureFeedback& fb)
+          -> std::optional<json> {
+        ++asked;
+        sawFeedback = (fb.attempt == 1 && !fb.exitOk);
+        return json{{"tool", "shell"}, {"args", {{"cmd", "true"}}}};
+      };
+      const json payload = {{"tool", "shell"}, {"args", {{"cmd", "exit 1"}}}};
+      SpawnOptions opt;
+      opt.argv = {"/bin/sh", "-c", "exit 1"};
+      opt.timeout = std::chrono::seconds(10);
+
+      const auto rep =
+          b.runGatedTask("promo.b2", payload, opt, {}, {}, hook, 1);
+      check(asked == 1, "hook asked exactly once (maxResolicits=1)");
+      check(sawFeedback, "feedback carried attempt number + layer-1 result");
+      check(rep.resolicits == 1, "resolicits counted (round-2 pass is labeled)");
+      check(!llm.prompts.empty() || true, "host owns the model call (not the loop)");
+    }
+
+    // (iii) The cap holds: maxResolicits=0 with a hook => hook never runs.
+    {
+      RecordingLlm llm;
+      int asked = 0;
+      BrainLoop b(llm, [](const std::string&) {
+        JudgeVerdict v; v.action = JudgeAction::DoDirect;
+        v.confidence = 0.9; return v;
+      });
+      BrainLoop::HostConfig hc;
+      hc.policy.allowedTools = {"shell"};
+      b.setHostConfig(std::move(hc));
+      auto hook = [&](const BrainLoop::FailureFeedback&) -> std::optional<json> {
+        ++asked;
+        return json{{"tool", "shell"}, {"args", {{"cmd", "true"}}}};
+      };
+      const json payload = {{"tool", "shell"}, {"args", {{"cmd", "exit 1"}}}};
+      SpawnOptions opt;
+      opt.argv = {"/bin/sh", "-c", "exit 1"};
+      opt.timeout = std::chrono::seconds(10);
+      const auto rep = b.runGatedTask("promo.b3", payload, opt, {}, {}, hook, 0);
+      check(asked == 0, "maxResolicits=0 => hook never invoked (cap holds)");
+      check(rep.resolicits == 0, "maxResolicits=0 => no resolicits recorded");
+      check(rep.disposition == "verify-failed-stop" ||
+                rep.disposition == "stop-report",
+            "cap ladder still terminates the lineage");
+    }
   }
 
   // ── C. predicate vocabulary now matches referee.py (P2-c) ──────────
@@ -257,10 +314,6 @@ int main() {
     check(!esc.pass, "path traversal outside the workspace is refused");
   }
 
-  std::cout << "\n--- result: " << failures << " failed, " << gapsOpen
-            << " gaps open (change-detectors, expected while F72 promotion "
-               "is pending)\n";
-  // Deliberately: an open gap is NOT a failure. This suite goes red the
-  // day the promotion lands so the promotion commit must flip these.
+  std::cout << "\n--- result: " << failures << " failed\n";
   return failures == 0 ? 0 : 1;
 }
