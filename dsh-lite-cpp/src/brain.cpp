@@ -177,7 +177,8 @@ void BrainLoop::emit(const LedgerEvent& ev) {
 BrainLoop::TaskReport BrainLoop::runGatedTask(const std::string& taskId,
                                               const nlohmann::json& payload,
                                               const SpawnOptions& opt,
-                                              RetryPlanner planner) {
+                                              RetryPlanner planner,
+                                              PostconditionHook postcondition) {
   TaskReport rep;
   rep.taskId = taskId;
   NudgeState& st = nudgeState(taskId);
@@ -237,17 +238,50 @@ BrainLoop::TaskReport BrainLoop::runGatedTask(const std::string& taskId,
 
     // G2.6: local exit-code verification (sycophancy-immune, F9).
     rep.verify = verifyViaSpawn(sr);
+
+    // F72 layer 2 (promotion): the host-declared artifact postcondition
+    // must be evaluated in the workspace BEFORE cleanup — the workspace
+    // is the evidence and cleanInternally would destroy it. Layer 2 only
+    // runs when layer 1 passed (an exit failure already decides FAIL, and
+    // checking content would report a confusing second reason).
+    if (postcondition && rep.verify.pass) {
+      try {
+        rep.postcondition = postcondition(sr.workspaceDir);
+      } catch (const std::exception& e) {
+        // A throwing hook is a HOST bug: fail loud, never a false pass.
+        rep.postcondition.pass = false;
+        rep.postcondition.evaluated = true;
+        rep.postcondition.detail =
+            std::string("postcondition hook threw: ") + e.what();
+      }
+    } else if (postcondition) {
+      rep.postcondition.pass = false;
+      rep.postcondition.evaluated = true;
+      rep.postcondition.detail = "exit-code failed; content unchecked";
+    }
+
     SwarmSpawner::cleanup(sr.workspaceDir);
     LedgerEvent vv;
     vv.type = "verify"; vv.taskId = taskId; vv.role = "reviewer";
-    vv.verdict = rep.verify.pass ? "pass" : "fail";
+    // Layer-aware verdict (F72): "pass" requires both layers. The
+    // ledger names which layer decided, so a reader can tell
+    // content-verified from exit-only without trusting a summary.
+    const bool contentLayer = static_cast<bool>(postcondition);
+    const bool bothPass = rep.verify.pass &&
+                          (!contentLayer || rep.postcondition.pass);
+    vv.verdict = bothPass ? "pass" : "fail";
     vv.detail = "exit=" + std::to_string(rep.verify.exitCode) +
-                (rep.verify.timedOut ? " timedOut=true" : "") + " " +
-                rep.verify.detail;
+                (rep.verify.timedOut ? " timedOut=true" : "") +
+                (contentLayer ? (rep.postcondition.pass ? " postcond=pass"
+                                                        : " postcond=FAIL")
+                              : " postcond=none") +
+                " " + rep.postcondition.detail + " " + rep.verify.detail;
     emit(vv);
 
-    if (rep.verify.pass) {
-      rep.disposition = "verified";
+    if (bothPass) {
+      // F72: "verified" (= content-checked) vs "verified-exit-only"
+      // (layer 1 only, nothing declared) — never conflated.
+      rep.disposition = contentLayer ? "verified" : "verified-exit-only";
       return rep;
     }
 

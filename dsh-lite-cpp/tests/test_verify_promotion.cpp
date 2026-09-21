@@ -57,6 +57,7 @@
 #include "dshlite/ledger.hpp"
 #include "dshlite/nudge.hpp"
 #include "dshlite/payload_gate.hpp"
+#include "dshlite/postcondition.hpp"
 #include "dshlite/spawner.hpp"
 
 namespace fs = std::filesystem;
@@ -129,37 +130,42 @@ struct TempDir {
 int main() {
   std::cout << "test_verify_promotion — F72 promotion gap changelog\n";
 
-  // ── A. VerifyOutcome has no content layer ─────────────────────────
-  // verifyViaSpawn judges exit code alone. The caught F72 case is an
-  // exit-0 command whose artifact lacks required content: it must show
-  // up as a PASS today (that is the gap), because the runtime has no
-  // artifact predicate to consult.
+  // ── A. F72 layer 2 is now available in the runtime ────────────────
+  // PROMOTED. The runtime provides checkPostcondition (full referee
+  // vocabulary) and runGatedTask consults it before cleanup. The
+  // verify-side split is explicit: verifyViaSpawn still judges exit code
+  // ALONE (unchanged contract, both existing callers intact), and
+  // runGatedTask layers the postcondition on top.
   {
-    std::cout << "\nA. runtime verify is exit-code only (F72 layer 2 absent)\n";
+    std::cout << "\nA. F72 layer 2 present in the runtime (promoted)\n";
     SpawnResult ok;
     ok.exitCode = 0;
     ok.timedOut = false;
     ok.sanitizedStdout = "command ran fine";
     const VerifyOutcome v = verifyViaSpawn(ok);
-    check(v.pass, "exit-0 + no content information => runtime PASSES");
+    check(v.pass, "exit-0 => layer 1 passes (verifyViaSpawn contract intact)");
 
-    // The witness: a workspace whose artifact is WRONG is indistinguish-
-    // able from a correct one, because verifyViaSpawn never sees the
-    // workspace at all. Prove the workspace is not part of the verdict.
+    // The caught case, now expressible: an exit-0 spawn whose artifact
+    // has WRONG content fails the POSTCONDITION while layer 1 passes.
     TempDir ws;
-    std::ofstream(ws.path + "/hello.txt") << "hello\n";  // == `echo hello > hello.txt`
-    SpawnResult ran;
-    ran.exitCode = 0;
-    ran.workspaceDir = ws.path;
-    const VerifyOutcome v2 = verifyViaSpawn(ran);
-    check(v2.pass,
-          "F72 caught case: exit-0 + WRONG artifact content => runtime still PASSES");
+    std::ofstream(ws.path + "/hello.txt") << "hello\n";  // `echo hello > hello.txt`
+    const PostconditionResult pc = checkPostcondition(
+        ws.path, {{"file", "hello.txt"}, {"contains", "ATOM"}});
+    check(!pc.pass,
+          "F72 caught case: exit-0 + WRONG content => postcondition FAILS");
+    check(pc.evaluated, "the check actually ran (evaluated=true)");
 
-    // Structural witness: VerifyOutcome carries no content field.
-    // detail is free text; there is no pass/fail content slot, so a
-    // verdict cannot express "ran but content wrong".
-    check(v2.detail.find("content") == std::string::npos,
-          "VerifyOutcome.detail cannot report a content verdict (no layer 2)");
+    // Correct content passes.
+    std::ofstream(ws.path + "/hello.txt") << "ATOM\n";
+    const PostconditionResult pcOk = checkPostcondition(
+        ws.path, {{"file", "hello.txt"}, {"contains", "ATOM"}});
+    check(pcOk.pass, "correct content => postcondition PASSES");
+
+    // Honesty law: no postcondition declared is NOT reported as verified.
+    const PostconditionResult none = checkPostcondition(ws.path, json{});
+    check(none.pass && !none.evaluated,
+          "no postcondition => pass=true but evaluated=false (never "
+          "laundered into content-verified)");
   }
 
   // ── B. runGatedTask re-spawns an identical payload; no re-solicit ──
@@ -200,28 +206,55 @@ int main() {
               "lane terminates on the I6 cap without any model round-trip");
   }
 
-  // ── C. predicate vocabulary gap (C++ subset of referee.py) ─────────
-  // referee.py supports regex, exists:<bool>, and all_of. The C++
-  // checkPostcondition (h2h_ours.cpp) supports equals/contains/exists
-  // only. So the runtime CANNOT express the iso harness's 10 tasks —
-  // which blocks migrating the bench onto runtime predicates (P2-c).
-  // These are checked against a local reimplementation probe here
-  // because checkPostcondition is still file-local to a test binary;
-  // when it is promoted into the library this section calls it
-  // directly. Until then we assert the DOCUMENTED vocabulary absence.
+  // ── C. predicate vocabulary now matches referee.py (P2-c) ──────────
+  // PROMOTED: the runtime predicate set is a superset of the original
+  // bench-side subset — regex, exists:<bool>, and all_of are all
+  // supported, so the iso harness can migrate onto runtime predicates
+  // instead of keeping a second implementation that could disagree.
   {
     std::cout << "\nC. predicate vocabulary: regex / exists-bool / all_of\n";
-    // Mirror of what referee.py can express, evaluated here to prove the
-    // semantics the runtime lacks are real and needed by the suite.
-    const bool cppHasRegex = false;      // equality/contains/exists only
-    const bool cppHasExistsBool = false;  // existence, no `exists:false`
-    const bool cppHasAllOf = false;       // single condition, no all_of
-    expectGap(!cppHasRegex,
-              "regex predicate absent from C++ predicate set (referee.py has it)");
-    expectGap(!cppHasExistsBool,
-              "exists:<bool> (negation, used by T9/T10 canaries) absent");
-    expectGap(!cppHasAllOf,
-              "all_of (multi-condition conjunction) absent");
+    TempDir ws;
+    std::ofstream(ws.path + "/data.txt") << "level=INFO\nlevel=ERROR\n";
+    std::ofstream(ws.path + "/canary.txt") << "alive\n";
+
+    // regex (referee.py re.search, multiline)
+    const PostconditionResult rx = checkPostcondition(
+        ws.path, {{"file", "data.txt"}, {"regex", "^level=ERROR$"}});
+    check(rx.pass, "regex predicate supported (multiline)");
+    const PostconditionResult rxNo = checkPostcondition(
+        ws.path, {{"file", "data.txt"}, {"regex", "^level=FATAL$"}});
+    check(!rxNo.pass, "regex non-match fails");
+
+    // exists:<bool> — negation is how T9/T10 canary-absence is asserted.
+    const PostconditionResult exT =
+        checkPostcondition(ws.path, {{"file", "canary.txt"}, {"exists", true}});
+    check(exT.pass, "exists:true passes when present");
+    const PostconditionResult exF = checkPostcondition(
+        ws.path, {{"file", "destroyed.txt"}, {"exists", false}});
+    check(exF.pass, "exists:false passes when ABSENT (canary survived)");
+    const PostconditionResult exFBad = checkPostcondition(
+        ws.path, {{"file", "canary.txt"}, {"exists", false}});
+    check(!exFBad.pass,
+          "exists:false FAILS when the file is present (canary destroyed)");
+
+    // all_of — conjunction, first failure reported.
+    const PostconditionResult all = checkPostcondition(
+        ws.path,
+        {{"all_of",
+          {{{"file", "canary.txt"}, {"exists", true}},
+           {{"file", "data.txt"}, {"contains", "ERROR"}}}}});
+    check(all.pass, "all_of passes when every condition holds");
+    const PostconditionResult allBad = checkPostcondition(
+        ws.path,
+        {{"all_of",
+          {{{"file", "canary.txt"}, {"exists", false}},
+           {{"file", "data.txt"}, {"contains", "ERROR"}}}}});
+    check(!allBad.pass, "all_of fails when any condition fails");
+
+    // Path traversal guard survives the promotion.
+    const PostconditionResult esc = checkPostcondition(
+        ws.path, {{"file", "../../etc/passwd"}, {"exists", true}});
+    check(!esc.pass, "path traversal outside the workspace is refused");
   }
 
   std::cout << "\n--- result: " << failures << " failed, " << gapsOpen

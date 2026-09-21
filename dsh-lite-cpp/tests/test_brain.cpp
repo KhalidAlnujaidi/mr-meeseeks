@@ -180,9 +180,15 @@ int main() {
     const nlohmann::json okPayload = {{"tool", "shell"}, {"args", {{"cmd", "true"}}}};
 
     // 8. Clean payload + exit 0 => verified, exactly one spawn.
+    // F72 promotion: with NO postcondition hook supplied this is
+    // "verified-exit-only" (layer 1 only) — deliberately NOT the bare
+    // "verified", which now means content-checked. Section 8b below
+    // supplies a hook and gets the stronger label.
     auto r1 = b.runGatedTask("g1", okPayload, spawnOpts("exit 0"));
-    check(r1.disposition == "verified" && r1.spawns == 1 && r1.verify.pass,
-          "G2.4: clean payload spawns once and verifies via exit code");
+    check(r1.disposition == "verified-exit-only" && r1.spawns == 1 &&
+              r1.verify.pass,
+          "F72: clean payload spawns once; no postcondition => "
+          "verified-exit-only (never a silent 'verified')");
 
     // 9. Unknown tool => refused, ZERO spawns (old code had no gate at
     // all — any payload spawned; this fails against pre-gate code).
@@ -211,6 +217,38 @@ int main() {
     check(r4.disposition == "verify-failed-stop" && r4.spawns == 3,
           "I6: 2 full-scope retries then stop — the 4th spawn never happens");
     check(b.nudgeState("g4").stopped, "lineage latched stopped after cap");
+
+    // 11b. F72 PROMOTION (the point of this change): an exit-0 spawn
+    // whose ARTIFACT is wrong must now FAIL at the runtime level. This is
+    // the exact caught case (T1 `echo hello > hello.txt`, exit 0, missing
+    // "ATOM"). Before the promotion this returned disposition
+    // "verified" — the gap tests/test_verify_promotion.cpp documents.
+    {
+      auto mustExist = [](const std::string& ws) {
+        PostconditionResult r;
+        r.evaluated = true;
+        r.pass = std::filesystem::exists(ws + "/must_be_here.txt");
+        r.detail = r.pass ? "found must_be_here.txt" : "missing must_be_here.txt";
+        return r;
+      };
+      // exit 0 but never creates the artifact => layer 1 passes, layer 2 fails.
+      auto rBad = b.runGatedTask("g5", okPayload, spawnOpts("exit 0"), {},
+                                 mustExist);
+      check(rBad.verify.pass, "F72: layer 1 (exit 0) still passes");
+      check(!rBad.postcondition.pass && rBad.postcondition.evaluated,
+            "F72: layer 2 FAILS on the missing artifact (content checked)");
+      check(rBad.disposition != "verified",
+            "F72 PROMOTION: exit-0 + wrong artifact is NOT 'verified'");
+
+      // Same command, artifact present => both layers pass => "verified".
+      auto rGood = b.runGatedTask("g6", okPayload,
+                                  spawnOpts("touch must_be_here.txt"), {},
+                                  mustExist);
+      check(rGood.postcondition.pass && rGood.postcondition.evaluated,
+            "F72: layer 2 PASSES when the artifact is present");
+      check(rGood.disposition == "verified",
+            "F72 PROMOTION: exit0 AND content => 'verified' (both layers)");
+    }
 
     // 12. Ledger recorded the whole sequence (DENY + verify + nudge +
     // report). LedgerWriter is unbuffered (one write(2) per line), so

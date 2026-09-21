@@ -46,6 +46,7 @@ add_library(dshlite STATIC
   src/usage_probe.cpp
   src/nudge.cpp
   src/payload_gate.cpp
+  src/postcondition.cpp
   src/compaction.cpp
   src/brain.cpp)
 target_include_directories(dshlite PUBLIC include)

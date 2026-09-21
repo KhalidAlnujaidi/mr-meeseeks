@@ -97,79 +97,18 @@ std::string slurp(const std::string& path) {
 }
 
 // ── F72: content postcondition verification ─────────────────────────────
-// Exit-code verification proves the command RAN; it cannot prove semantic
-// compliance (final-bench evidence: T1 solicited `echo hello > hello.txt`,
-// exit 0, artifact missing the required "ATOM"). A task is only
-// POSTCONDITION-VERIFIED when the tasks.json ground_truth holds against
-// the ACTUAL artifact in the spawn workspace, checked BEFORE cleanup.
-// Returns {pass, human-readable reason}. Absent ground_truth => pass with
-// "no-postcondition" (exit-code only, reported as such — never a silent
-// upgrade to content-verified).
-struct PostconditionResult {
-  bool pass = false;
-  std::string detail;
-};
-
-PostconditionResult checkPostcondition(const std::string& workspaceDir,
-                                       const nlohmann::json& gt) {
-  PostconditionResult r;
-  if (gt.is_null() || gt.empty()) {
-    r.pass = true;
-    r.detail = "no-postcondition (exit-code only)";
-    return r;
-  }
-  if (!gt.contains("file") || !gt["file"].is_string()) {
-    r.pass = false;
-    r.detail = "ground_truth missing string 'file'";
-    return r;
-  }
-  const std::string fname = gt["file"].get<std::string>();
-  // Path traversal guard: the artifact must resolve INSIDE the ephemeral
-  // workspace (defense in depth; the spawner already pins cwd there).
-  const std::filesystem::path ws(workspaceDir);
-  std::filesystem::path f = ws / fname;
-  std::error_code ec;
-  f = std::filesystem::weakly_canonical(f, ec);
-  if (ec || f.string().rfind(std::filesystem::weakly_canonical(ws, ec).string(), 0) != 0) {
-    r.pass = false;
-    r.detail = "artifact path escapes workspace: " + fname;
-    return r;
-  }
-  if (!std::filesystem::exists(f)) {
-    r.pass = false;
-    r.detail = "artifact missing: " + fname;
-    return r;
-  }
-  const std::string content = slurp(f.string());
-  // "equals" (exact, trailing newline trimmed) wins over "contains".
-  if (gt.contains("equals") && gt["equals"].is_string()) {
-    std::string got = content;
-    while (!got.empty() && (got.back() == '\n' || got.back() == '\r')) got.pop_back();
-    if (got == gt["equals"].get<std::string>()) {
-      r.pass = true;
-      r.detail = fname + " equals-verified";
-    } else {
-      r.pass = false;
-      r.detail = fname + " content mismatch (want equals, got \"" +
-                 got.substr(0, 64) + "\")";
-    }
-    return r;
-  }
-  if (gt.contains("contains") && gt["contains"].is_string()) {
-    if (content.find(gt["contains"].get<std::string>()) != std::string::npos) {
-      r.pass = true;
-      r.detail = fname + " contains-verified";
-    } else {
-      r.pass = false;
-      r.detail = fname + " content mismatch (missing required substring)";
-    }
-    return r;
-  }
-  r.pass = true;  // file-exists-only ground truth
-  r.detail = fname + " exists-verified";
-  return r;
-}
-
+// PROMOTED to the library (include/dshlite/postcondition.hpp, P2-c).
+// The local copy that used to live here supported only
+// equals/contains/exists; the runtime version supports the full
+// referee vocabulary (regex, exists:<bool>, all_of) so this bench and
+// the runtime share ONE definition of "content-verified" instead of
+// two that could disagree. `using` keeps the call sites unchanged.
+// The promoted runtime implementation is the single source of truth.
+// Call sites below keep their existing names via these using-decls, so
+// the F72 regression selftest still exercises the SAME predicates the
+// runtime loop now uses.
+using dshlite::PostconditionResult;
+using dshlite::checkPostcondition;
 // ── Offline selftest (F72 regression; no engine, no network) ────────────
 // Includes the EXACT final-bench caught case: exit-0 spawn whose artifact
 // lacks the required content must FAIL the postcondition. Any build
@@ -470,11 +409,19 @@ int main(int argc, char** argv) {
           const VerifyOutcome v = verifyViaSpawn(spRes);
           row["verify_pass"] = v.pass;
           // Layer 2 (F72): content postcondition — proves it did the TASK.
-          const PostconditionResult pc =
-              v.pass ? checkPostcondition(spRes.workspaceDir, gt)
-                     : PostconditionResult{false, "exit-code failed; content unchecked"};
+          // Field-wise construction (the promoted struct carries
+          // `evaluated` too, so a positional brace-init would misbind).
+          PostconditionResult pc;
+          if (v.pass) {
+            pc = checkPostcondition(spRes.workspaceDir, gt);
+          } else {
+            pc.pass = false;
+            pc.evaluated = true;
+            pc.detail = "exit-code failed; content unchecked";
+          }
           row["postcond_pass"] = pc.pass;
           row["postcond_detail"] = pc.detail;
+          row["postcond_evaluated"] = pc.evaluated;
           SwarmSpawner::cleanup(spRes.workspaceDir);
 
           LedgerEvent vv;

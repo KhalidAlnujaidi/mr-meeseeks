@@ -19,6 +19,7 @@
 #include "dshlite/llm_client.hpp"
 #include "dshlite/nudge.hpp"
 #include "dshlite/payload_gate.hpp"
+#include "dshlite/postcondition.hpp"
 
 namespace dshlite {
 
@@ -76,13 +77,27 @@ class BrainLoop {
   /// What one gated task attempt sequence ended in.
   struct TaskReport {
     std::string taskId;
-    /// "verified" | "verify-failed-stop" | "gate-refused" |
-    /// "propose-only" | "stop-report" | "spawn-error"
+    /// "verified" | "verified-exit-only" | "verify-failed-stop" |
+    /// "gate-refused" | "propose-only" | "stop-report" | "spawn-error"
+    ///
+    /// F72 promotion: "verified" means exit0 AND a content postcondition
+    /// held. "verified-exit-only" means exit0 with NO postcondition
+    /// declared — honest about being layer 1 only, never a silent
+    /// upgrade (F72 wording).
     std::string disposition;
     VerifyOutcome verify;
     GateVerdict gate;
     int spawns = 0;  ///< actual subprocess executions (0 on every refuse)
+    /// F72 layer 2 outcome. evaluated=false => no postcondition declared.
+    PostconditionResult postcondition;
   };
+
+  /// F72 promotion: host-declared artifact postcondition for a task.
+  /// Called with the spawn workspace dir AFTER layer 1 passes and BEFORE
+  /// the workspace is cleaned. Returns the layer-2 verdict. The host owns
+  /// the ground truth; the model never supplies it (sycophancy-immune).
+  using PostconditionHook =
+      std::function<PostconditionResult(const std::string& workspaceDir)>;
 
   /// Decides the NEXT attempt's scope after a verification failure.
   /// round = failures so far (0-based); may rewrite `payload` (narrower
@@ -99,10 +114,19 @@ class BrainLoop {
   /// never spawns; every refusal/verify/nudge is a ledger line when a
   /// ledger is configured. F31: allowedEnv stays caller-owned — this
   /// loop never adds keys to SpawnOptions.
+  ///
+  /// F72 promotion: when `postcondition` is supplied, layer 1 (exit
+  /// code) must pass AND layer 2 (host-declared artifact postcondition,
+  /// evaluated in the workspace BEFORE cleanup) must hold for
+  /// disposition "verified". With no hook, the disposition is
+  /// "verified-exit-only" — honest about being layer 1 only, never a
+  /// silent upgrade. Existing callers pass no hook and keep their
+  /// behavior with the honest label.
   TaskReport runGatedTask(const std::string& taskId,
                           const nlohmann::json& payload,
                           const SpawnOptions& opt,
-                          RetryPlanner planner = {});
+                          RetryPlanner planner = {},
+                          PostconditionHook postcondition = {});
 
   /// G2.4 solicit: ask the model for a tool payload under a
   /// response_format grammar (built from `tools`), then STRICT-parse
