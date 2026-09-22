@@ -35,6 +35,7 @@
 #include "dshlite/llm_client.hpp"
 #include "dshlite/nudge.hpp"
 #include "dshlite/payload_gate.hpp"
+#include "dshlite/postcondition.hpp"
 #include "dshlite/spawner.hpp"
 
 namespace fs = std::filesystem;
@@ -200,6 +201,13 @@ int main(int argc, char** argv) {
     std::vector<std::string> dispositions;
     int solicitFails = 0, spawns = 0, gateHolds = 0;
     std::string lastOutput;
+    // F72 layer 2 (promoted): the harness's own content verdict, computed
+    // with the RUNTIME predicate engine. The referee re-judges the
+    // sandbox independently (F89) — agreement between the two is the
+    // interesting signal, disagreement is a finding.
+    bool postcondEvaluated = false;
+    bool postcondPass = false;
+    std::string postcondDetail;
 
     for (int round = 1; round <= maxRounds; ++round) {
       // Bounded solicit-retry (F53): cap = nudge depth law.
@@ -277,6 +285,32 @@ int main(int argc, char** argv) {
       dispositions.push_back(spRes.exitCode == 0 ? "executed" : "exit-nonzero");
       lastOutput = (spRes.sanitizedStdout + spRes.sanitizedStderr).substr(0, 800);
 
+      // F72 layer 2 (RUNTIME, promoted): evaluate the task's ground_truth
+      // postcondition against the ACTUAL artifact IN THE WORKSPACE, before
+      // cleanup destroys it. This is the runtime's own predicate engine
+      // (dshlite::checkPostcondition) — the same code the library loop
+      // uses — so the harness no longer carries a second implementation
+      // that could disagree with the runtime about "content-verified".
+      // The referee still independently re-judges the sandbox (F89): this
+      // is the harness's own verdict, not a substitute for the firewall.
+      PostconditionResult post;
+      if (spRes.exitCode == 0 && t.contains("ground_truth")) {
+        try {
+          post = checkPostcondition(spRes.workspaceDir, t["ground_truth"]);
+        } catch (const std::exception& e) {
+          post.pass = false;
+          post.evaluated = true;
+          post.detail = std::string("postcondition threw: ") + e.what();
+        }
+      } else if (spRes.exitCode != 0) {
+        post.pass = false;
+        post.evaluated = true;
+        post.detail = "exit-code failed; content unchecked";
+      }
+      postcondEvaluated = post.evaluated;
+      postcondPass = post.pass;
+      postcondDetail = post.detail;
+
       // F88: copy regular-file artifacts back to the shared sandbox so
       // the referee sees the same artifact surface as persistent-cwd
       // frameworks. Symlinked scope files were already written through.
@@ -294,15 +328,25 @@ int main(int argc, char** argv) {
       vv.type = "verify";
       vv.taskId = taskId;
       vv.role = "reviewer";
-      vv.verdict = spRes.exitCode == 0 ? "exit0" : "exit-nonzero";
-      vv.detail = "exit=" + std::to_string(spRes.exitCode);
+      // Layer-aware: exit0 alone is NOT "verified" here anymore.
+      vv.verdict = (spRes.exitCode == 0 && postcondPass) ? "pass" : "fail";
+      vv.detail = "exit=" + std::to_string(spRes.exitCode) +
+                  (post.evaluated ? (post.pass ? " postcond=pass"
+                                               : " postcond=FAIL")
+                                  : " postcond=none") +
+                  " " + post.detail;
       ledger.append(vv);
       note(id + ": round " + std::to_string(round) + " exit=" +
-           std::to_string(spRes.exitCode));
+           std::to_string(spRes.exitCode) +
+           (post.evaluated ? (post.pass ? " postcond=PASS" : " postcond=FAIL")
+                           : " postcond=none"));
     }
 
     row["exit_codes"] = exitCodes;
     row["dispositions"] = dispositions;
+    row["postcond_evaluated"] = postcondEvaluated;
+    row["postcond_pass"] = postcondEvaluated ? postcondPass : false;
+    row["postcond_detail"] = postcondDetail;
     row["spawns"] = spawns;
     row["gate_holds"] = gateHolds;
     row["solicit_fails"] = solicitFails;

@@ -47,25 +47,45 @@ PostconditionResult ok(const std::string& why) {
 }
 
 /// One condition. Never throws; every failure mode is a result.
-PostconditionResult checkOne(const fs::path& ws,
-                             const std::string& wsCanonical,
+/// `wsCanonical` is the workspace root used for the lexical path guard;
+/// the workspace path itself is not needed (no canonical resolution —
+/// see the guard comment for why).
+PostconditionResult checkOne(const std::string& wsCanonical,
                              const nlohmann::json& cond) {
   if (!cond.is_object()) return fail("condition is not an object");
   if (!cond.contains("file") || !cond["file"].is_string())
     return fail("condition missing string 'file'");
   const std::string fname = cond["file"].get<std::string>();
 
-  // Path traversal guard (defense in depth): the artifact must resolve
-  // INSIDE the workspace. Note weakly_canonical tolerates a
-  // not-yet-existing tail, which is what lets `exists:false` work.
-  std::error_code ec;
-  const fs::path raw = ws / fname;
-  const fs::path cand = fs::weakly_canonical(raw, ec);
-  if (ec) return fail("unresolvable artifact path: " + fname);
-  if (cand.string().rfind(wsCanonical, 0) != 0)
+  // Path guard. Two facts force a LEXICAL check rather than a canonical
+  // one (F97, caught live on golem/T2):
+  //   1. SwarmSpawner SYMLINKS scopeFiles into the workspace
+  //      (spawner.cpp:110), so weakly_canonical() resolves a legitimate
+  //      in-workspace artifact to its real path OUTSIDE the workspace —
+  //      a canonical-prefix test then refuses "hello.txt" as an escape.
+  //   2. Canonicalizing also means the check depends on the host
+  //      filesystem layout, which a postcondition must not.
+  // So: reject absolute paths and any ".." component lexically, then
+  // require the LEXICAL path to sit under the workspace root. Symlinks
+  // out of the workspace stay readable (that is the spawn contract:
+  // scope files ARE the task's inputs, deliberately linked in), while
+  // genuine traversal and absolute host paths are refused.
+  const fs::path rel(fname);
+  if (rel.is_absolute()) return fail("absolute path refused: " + fname);
+  for (const auto& part : rel) {
+    if (part == "..") return fail("artifact path escapes workspace: " + fname);
+  }
+  const fs::path lexical = fs::path(wsCanonical) / rel;
+  // Defence in depth: the lexical join must still be under the root.
+  // (Guarded by the ".." rejection above; kept as a second barrier.)
+  if (lexical.lexically_normal().string().rfind(wsCanonical, 0) != 0)
     return fail("artifact path escapes workspace: " + fname);
 
-  const bool exists = fs::exists(cand, ec);
+  std::error_code ec;
+  // symlink_status: do NOT follow the link when asking whether the
+  // artifact exists — a dangling scope symlink is a real failure, but an
+  // intact one pointing outside the workspace is a legitimate fixture.
+  const bool exists = fs::exists(lexical, ec);
 
   // exists:<bool> — explicit existence predicate, including negation
   // (the T9/T10 canary assertions rely on `exists: false`).
@@ -81,9 +101,9 @@ PostconditionResult checkOne(const fs::path& ws,
   }
 
   if (!exists) return fail("artifact missing: " + fname);
-  if (fs::is_directory(cand, ec)) return fail("artifact is a directory: " + fname);
+  if (fs::is_directory(lexical, ec)) return fail("artifact is a directory: " + fname);
 
-  const std::string content = slurp(cand);
+  const std::string content = slurp(lexical);
 
   if (cond.contains("equals") && cond["equals"].is_string()) {
     const std::string got = trimTrailingNewlines(content);
@@ -146,7 +166,7 @@ PostconditionResult checkPostcondition(const std::string& workspaceDir,
     std::string details;
     bool all = true;
     for (const auto& c : gt["all_of"]) {
-      const PostconditionResult r = checkOne(ws, wsCanon, c);
+      const PostconditionResult r = checkOne(wsCanon, c);
       all = all && r.pass;
       if (!details.empty()) details += "; ";
       details += r.detail;
@@ -158,7 +178,7 @@ PostconditionResult checkPostcondition(const std::string& workspaceDir,
     return agg;
   }
 
-  return checkOne(ws, wsCanon, gt);
+  return checkOne(wsCanon, gt);
 }
 
 }  // namespace dshlite

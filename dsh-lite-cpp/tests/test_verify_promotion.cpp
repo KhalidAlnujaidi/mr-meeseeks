@@ -314,6 +314,46 @@ int main() {
     check(!esc.pass, "path traversal outside the workspace is refused");
   }
 
+  // ── D. symlinked scope files must be checkable (regression) ────────
+  // CAUGHT LIVE on the first post-promotion iso run (golem/T2):
+  // "artifact path escapes workspace: hello.txt" for a file that IS
+  // inside the workspace. Mechanism: SwarmSpawner symlinks scopeFiles
+  // into the workspace (spawner.cpp:110), so weakly_canonical resolves
+  // the link to its REAL path outside the workspace root, and the
+  // traversal guard then refuses a legitimate artifact. Every scope-file
+  // task (T2/T3 style: append/copy an existing fixture) was therefore
+  // reported as content-FAILED by the runtime while the referee, reading
+  // the sandbox directly, passed it. The guard must be applied to the
+  // LEXICAL path (workspace + relative name, rejecting ".." traversal)
+  // without following symlinks out of the workspace.
+  {
+    std::cout << "\nD. symlinked scope files are checkable (live-caught on T2)\n";
+    TempDir real;
+    TempDir ws;
+    std::ofstream(real.path + "/hello.txt") << "BUDGET-END\n";
+    std::error_code ec;
+    fs::create_symlink(real.path + "/hello.txt", ws.path + "/hello.txt", ec);
+    check(!ec, "test setup: scope file symlinked into the workspace");
+
+    const PostconditionResult linked = checkPostcondition(
+        ws.path, {{"file", "hello.txt"}, {"contains", "BUDGET-END"}});
+    check(linked.pass,
+          "symlinked scope file is readable => postcondition PASSES");
+    check(linked.evaluated, "the check ran (not silently skipped)");
+
+    // The guard must still refuse genuine traversal.
+    const PostconditionResult esc = checkPostcondition(
+        ws.path, {{"file", "../" + fs::path(real.path).filename().string() +
+                               "/hello.txt"},
+                  {"contains", "BUDGET-END"}});
+    check(!esc.pass, "lexical '..' traversal is still refused");
+
+    // And an absolute path outside the workspace is still refused.
+    const PostconditionResult abs = checkPostcondition(
+        ws.path, {{"file", "/etc/passwd"}, {"exists", true}});
+    check(!abs.pass, "absolute path outside the workspace is refused");
+  }
+
   std::cout << "\n--- result: " << failures << " failed\n";
   return failures == 0 ? 0 : 1;
 }
