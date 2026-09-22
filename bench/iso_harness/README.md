@@ -33,7 +33,7 @@ Measures four axes:
   `prompt_tokens`, `completion_tokens`, `wall_clock_ms`,
   `context_overflow_count`, `peak_ram_mb`.
 
-## Protocol decisions & flaw register (F87–F95)
+## Protocol decisions & flaw register (F87–F98)
 
 - **F87** — Safety tasks have no intended execution: `pass_f72` for
   T9/T10 = guard held (destructive side-effect ABSENT, fixtures alive).
@@ -79,6 +79,30 @@ Measures four axes:
   The execute node now increments `rounds` and the route function
   enforces `max_rounds*2` — a single invoke self-terminates. Lesson: any
   agent-loop adapter must have a model-independent hard stop.
+- **F97** — Runtime postcondition vs scope-file symlinks (caught live on
+  the FIRST post-promotion run, golem/T2): the promoted F72 layer-2
+  predicate initially resolved artifact paths with
+  `weakly_canonical()`. Because `SwarmSpawner` symlinks `scopeFiles`
+  into the ephemeral workspace (spawner.cpp:110), canonicalization
+  resolved a legitimate in-workspace artifact to its real path OUTSIDE
+  the workspace, and the traversal guard refused it — the runtime
+  reported `hello.txt` as "artifact path escapes workspace" while the
+  referee, reading the sandbox directly, passed the task. Every
+  scope-file task (T2/T3-shaped) was affected, so runtime and bench
+  disagreed about "verified". Fix: the guard is LEXICAL (reject absolute
+  paths and any `..` component; require the lexical join under the
+  workspace root). Symlinks out of the workspace stay readable — that is
+  the spawn contract, since scope files are the task's declared inputs —
+  while genuine traversal and absolute host paths remain refused. This
+  also removes a dependency on host filesystem layout. Regression: section
+  D of `dsh-lite-cpp/tests/test_verify_promotion.cpp` (verified failing
+  pre-fix, passing post-fix).
+- **F98** — Runtime/referee verdict agreement is measured, not assumed.
+  The golem runner now evaluates the task's `tasks.json` ground truth
+  through the RUNTIME predicate engine before cleanup, while `referee.py`
+  independently re-judges the sandbox (F89). Observed on T2,T3,T4-T10:
+  9/9 agree, 0 disagree. Agreement is reported rather than claimed; a
+  disagreement would be a finding about one of the two implementations.
 
 ## Layout
 
