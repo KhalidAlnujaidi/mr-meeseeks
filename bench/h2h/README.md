@@ -157,6 +157,32 @@ open-source agent harness, run FAIRLY:
   and failed a postcondition against a file that existed. That is the
   verification layer catching its own caller, which is the intended order
   of things.
+- **F103 the CLI's derived postcondition could verify the INPUT instead
+  of the OUTPUT** (caught live on the first scoped run): for "Sort the
+  lines of numbers.txt ... write the result to sorted.txt", the parser
+  took the first filename in the sentence — `numbers.txt`, the *input* —
+  so the run reported `numbers.txt exists=true` and emitted `VERIFIED`
+  without ever checking that `sorted.txt` was produced. A pass asserted
+  about the wrong artifact is worse than no assertion, because it looks
+  like verification. Fix: output-side phrasing (`result to`, `result
+  into`, `output to`) is consulted before any positional fallback, and the
+  same task now reports `sorted.txt exists=true`. Same run confirms the
+  isolation contract holds: all three input checksums unchanged and the
+  new artifact absent from the user's directory, present only in the
+  staging copy.
+- **F104 the sandbox made the agent useless on existing projects**
+  (design gap, not a bug): every spawn gets a fresh ephemeral workspace
+  that is deleted afterwards, so a task could not read a real project —
+  `git status --short` returned "not a git repository". Fixed with
+  `--scope-dir`, which stages regular files from a chosen directory into
+  the workspace (depth-limited, size-capped, symlinks deliberately NOT
+  followed so a link cannot pull host files in). Inputs are staged and the
+  worker still runs fully sandboxed; **outputs are NOT written back** —
+  they are reported as changed-file names and the staging copy is kept
+  only under `--keep`, so a human reviews before anything touches the
+  original. Auto-writing model output into a real repo would be exactly
+  the unverified side effect the gate exists to prevent. Verified live:
+  3 files staged, 1 reported new, original checksums unchanged.
 
 ## Run
 

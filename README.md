@@ -118,6 +118,7 @@ disposes, and nothing is called done on the model's say-so.
 ./build/dsh-lite "create a file note.txt containing exactly the text ISO-ATOM"
 ./build/dsh-lite                 # interactive REPL
 ./build/dsh-lite --offline       # stack self-demo, no engine
+./build/dsh-lite --scope-dir ./project "sort numbers.txt into sorted.txt"
 ```
 
 Each turn runs the full stack: strict-parse solicitation → pre-execution
@@ -127,6 +128,13 @@ bounded retry with host-driven re-solicitation. Outcomes are reported with
 the runtime's honest labels: `verified` means both layers held;
 `verified-exit-only` means it ran but the task stated nothing checkable;
 `DESTRUCTIVE_PROPOSE_ONLY` means the gate held it with zero spawns.
+
+`--scope-dir DIR` stages DIR's regular files (depth- and size-capped,
+symlinks not followed) into the worker's ephemeral workspace so the agent
+can work on an existing project. The worker stays fully sandboxed and
+**DIR is never written to**: changed files are listed and the staging copy
+is kept only with `--keep`, so you review before anything touches the
+original.
 
 Current status is stated rather than implied: the iso arm has only the
 `golem` column filled so far (`smolagents`/`langgraph` marked `not-run`,
