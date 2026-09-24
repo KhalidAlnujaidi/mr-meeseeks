@@ -150,6 +150,24 @@ Measures four axes:
   existed to gate). Both are the same upstream cause observed at different
   stages: OLMoE does not reliably produce the framed tool-call JSON.
 
+  **Why the F50 grammar route cannot fix this on the current engine.**
+  The obvious remedy — tighten the tool-name span in the payload grammar —
+  is unavailable here, and that is measured, not assumed. `toolPayloadFormat`
+  already emits `properties: {tool: {enum: [...]}}` with a required
+  `tool`, so the span IS constrained in the schema the host sends. But a
+  live probe against the locked engine returns
+  `{"code":"unsupported_parameter"}` — "`response_format` grammars are not
+  supported by the olmoe engine yet" — matching F46/F54
+  (`grammar_payload=False` for this family; only the 744B GLM family
+  reports True). Every solicitation therefore takes the F51
+  unconstrained-fallback path, the grammar field is dropped on the wire,
+  and the model is free to answer in prose or invent a tool name. So F100
+  is not fixable by grammar work on OLMoE at all: on this engine the only
+  available lever is the PROMPT (few-shot framing / explicit vocabulary),
+  which is a protocol change with its own fairness consequences, or a
+  different engine family entirely. Recorded so nobody spends a session
+  re-deriving it.
+
 ## Layout
 
 ```

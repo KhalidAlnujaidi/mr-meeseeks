@@ -118,7 +118,11 @@ src/usage_probe.cpp             (route_trace.h format: v1 headers, sparse
                                  never throws/locks — engine publishes via
                                  temp+rename (F37); warm=mtime-fresh (F38);
                                  best-effort telemetry, gates nothing (F5))
-src/main.cpp                    dsh-lite demo binary
+src/main.cpp                    Golem CLI agent (`dsh-lite`): REPL + one-shot task,
+                                drives solicit -> gate -> spawn -> dual-layer
+                                verify with bounded re-solicitation; derives a
+                                postcondition from explicitly-stated task text
+                                (F102) and extends the destructive policy (F101)
 tests/test_{sanitizer,spawner,brain,llm,router,ledger,nudge,stall,f33_p1,g4_stress,grammar,abi}.cpp   milestone acceptance suites
 tests/g4_run.cpp                Gap 4 live-run driver (needs running engines; ledger to
                                 $GOLEM_LEDGER or <temp>/golem-g4-ledger.jsonl)

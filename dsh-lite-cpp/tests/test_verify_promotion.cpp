@@ -425,6 +425,60 @@ int main() {
           "F99 control: no binder => payload never executed => not verified");
   }
 
+  // ── F. F101: destructive-verb coverage (the CLI's policy) ──────────
+  // CAUGHT LIVE building the CLI agent: the stock policy lists "rm -rf"
+  // but not a bare "rm", so `rm canary.txt` gated OK and EXECUTED. The
+  // unit suites never drove that exact command, so nothing caught it.
+  // The CLI now extends the policy with rm/unlink/shred; this section
+  // pins the coverage so the gap cannot silently return.
+  {
+    std::cout << "\nF. F101: bare `rm` is propose-only, not executable\n";
+    // The gap, pinned exactly: with the STOCK verbs but a shell allowlist
+    // (the configuration a fresh host naturally writes), `rm canary.txt`
+    // is ALLOWED and auto-executable. Note the stock list has "rm -rf"
+    // only — the bare verb is absent, which is what F101 records.
+    PolicyConfig stock;
+    stock.allowedTools = {"shell"};
+    const json rmCanary = {{"tool", "shell"}, {"args", {{"cmd", "rm canary.txt"}}}};
+    const GateVerdict vStock = checkPayload(rmCanary, stock);
+    check(vStock.allowed && autoExecutable(vStock),
+          "F101: stock verbs let `rm canary.txt` through (the gap, pinned)");
+
+    PolicyConfig extended;
+    extended.allowedTools = {"shell"};
+    for (const char* v : {"rm", "unlink", "shred"})
+      extended.destructiveVerbs.push_back(v);
+    const GateVerdict vExt = checkPayload(rmCanary, extended);
+    check(vExt.code == "DESTRUCTIVE_PROPOSE_ONLY",
+          "F101: extended policy => DESTRUCTIVE_PROPOSE_ONLY");
+    check(!autoExecutable(vExt), "F101: propose-only never auto-executes");
+    check(extended.allowedTools.size() == 1, "F101: allowlist unchanged");
+
+    // The other destructive spellings the model may reach for.
+    for (const char* w : {"unlink x", "shred x", "rm -f x"}) {
+      const json d = {{"tool", "shell"}, {"args", {{"cmd", w}}}};
+      check(checkPayload(d, extended).code == "DESTRUCTIVE_PROPOSE_ONLY",
+            (std::string("F101: propose-only for `") + w + "`").c_str());
+    }
+
+    // No over-blocking: benign commands stay executable.
+    const json safe = {{"tool", "shell"}, {"args", {{"cmd", "sort -n in.txt > out.txt"}}}};
+    const GateVerdict vSafe = checkPayload(safe, extended);
+    check(vSafe.code == "OK" && autoExecutable(vSafe),
+          "F101: benign command still OK (no over-blocking)");
+
+    // F21 word-boundary law survives the extension. Measured: `information`
+    // is OK (the 'm' before 'format' is alphanumeric, so no word-boundary
+    // hit) while a standalone `format` IS propose-only. Asserting the real
+    // behaviour, not the folklore.
+    const json inform = {{"tool", "shell"}, {"args", {{"cmd", "echo information"}}}};
+    check(checkPayload(inform, extended).code == "OK",
+          "F101: 'information' NOT demoted by the 'format' verb (F21 held)");
+    const json fmt = {{"tool", "shell"}, {"args", {{"cmd", "format disk"}}}};
+    check(checkPayload(fmt, extended).code == "DESTRUCTIVE_PROPOSE_ONLY",
+          "F101: standalone 'format' IS propose-only (F21 held both ways)");
+  }
+
   std::cout << "\n--- result: " << failures << " failed\n";
   return failures == 0 ? 0 : 1;
 }
