@@ -354,6 +354,77 @@ int main() {
     check(!abs.pass, "absolute path outside the workspace is refused");
   }
 
+  // ── E. F99: a re-solicited payload must be EXECUTED, not just gated ──
+  // CAUGHT by ad-hoc probe after wiring ReSolicitHook into golem_runner:
+  // section B proved the hook is CALLED and counted, but the fresh
+  // payload never reached the sandbox. runGatedTask rebuilds `current`
+  // from the hook, yet the only spawn used the caller-built opt.argv, so
+  // attempt 2 re-ran the command that had just failed while
+  // rep.resolicits claimed a round-2 pass. The ExecutionBinder is the
+  // fix: argv is re-derived from the payload the gate approved.
+  //
+  // This is the detector that was missing: B asserted the hook ran, E
+  // asserts its payload actually took effect (observable via the artifact).
+  {
+    std::cout << "\nE. re-solicited payload is executed (F99)\n";
+    RecordingLlm llm;
+    BrainLoop b(llm, [](const std::string&) {
+      JudgeVerdict v;
+      v.action = JudgeAction::DoDirect;
+      v.confidence = 0.9;
+      return v;
+    });
+    BrainLoop::HostConfig hc;
+    hc.policy.allowedTools = {"shell"};
+    b.setHostConfig(std::move(hc));
+
+    TempDir real;
+    const std::string artifact = real.path + "/note.txt";
+
+    int hookCalls = 0;
+    auto hook = [&](const BrainLoop::FailureFeedback& fb)
+        -> std::optional<json> {
+      ++hookCalls;
+      (void)fb;
+      // The fresh payload writes the artifact the postcondition wants.
+      return json{{"tool", "shell"},
+                  {"args", {{"cmd", "printf 'ISO-ATOM\\n' > note.txt"}}}};
+    };
+    constexpr int kMax = 1;
+    BrainLoop::RetryPlanner planner = [&](int, json&) -> RetryScope {
+      return hookCalls < kMax ? RetryScope::NarrowOrReroute
+                              : RetryScope::FullScope;
+    };
+    auto postcond = [&](const std::string& ws) {
+      return checkPostcondition(ws, json{{"file", "note.txt"},
+                                        {"contains", "ISO-ATOM"}});
+    };
+    auto bindExec = [](SpawnOptions& so, const json& pl) {
+      so.argv = {"/bin/sh", "-c", pl["args"].value("cmd", "false")};
+    };
+
+    SpawnOptions opt;
+    opt.argv = {"/bin/sh", "-c", "true"};  // gates fine, writes nothing
+    opt.timeout = std::chrono::seconds(10);
+    const auto rep = b.runGatedTask("promo.e", {{"tool", "shell"},
+                                                {"args", {{"cmd", "true"}}}},
+                                    opt, planner, postcond, hook, kMax,
+                                    bindExec);
+    check(rep.disposition == "verified",
+          "F99: fresh payload EXECUTED => artifact produced => verified");
+    check(rep.spawns == 2, "F99: the failing and the fresh payload both spawned");
+    check(rep.resolicits == 1, "F99: the pass is labeled round-2");
+    check(hookCalls == 1, "F99: hook asked exactly once");
+
+    // Control: WITHOUT the binder the same setup must NOT verify — this is
+    // the pre-fix behavior, kept as the red-direction witness.
+    const auto repNo =
+        b.runGatedTask("promo.e2", {{"tool", "shell"}, {"args", {{"cmd", "true"}}}},
+                       opt, {}, postcond, {}, 0);
+    check(repNo.disposition != "verified",
+          "F99 control: no binder => payload never executed => not verified");
+  }
+
   std::cout << "\n--- result: " << failures << " failed\n";
   return failures == 0 ? 0 : 1;
 }

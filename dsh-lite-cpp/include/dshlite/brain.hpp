@@ -21,6 +21,7 @@
 #include "dshlite/nudge.hpp"
 #include "dshlite/payload_gate.hpp"
 #include "dshlite/postcondition.hpp"
+#include "dshlite/spawner.hpp"
 
 namespace dshlite {
 
@@ -147,6 +148,26 @@ class BrainLoop {
   using ReSolicitHook = std::function<std::optional<nlohmann::json>(
       const FailureFeedback& feedback)>;
 
+  /// F72 part 2, EXECUTION BINDING (F99): maps a payload to the argv the
+  /// sandbox actually runs. Without it a re-solicited payload is a
+  /// no-op: the loop would gate the NEW payload while `opt.argv` still
+  /// held the caller's ORIGINAL command, so attempt 2 would re-run the
+  /// command that just failed and rep.resolicits would claim a round-2
+  /// pass that never happened.
+  ///
+  /// Deliberately a hook, not a payload->argv convention inside the
+  /// loop: the loop must stay tool-agnostic (checkPayload already is),
+  /// so the HOST owns the mapping — the same layering rule as
+  /// ReSolicitHook/JudgeHook. Called ONCE for the initial payload and
+  /// again after every accepted re-solicitation (and after a planner
+  /// rewrite), always BEFORE the spawn, so what the gate approved and
+  /// what the sandbox executes are the same payload by construction.
+  ///
+  /// Omitting it keeps the pre-F99 behavior for callers that only ever
+  /// run the payload they passed in.
+  using ExecutionBinder =
+      std::function<void(SpawnOptions& opt, const nlohmann::json& payload)>;
+
   /// G2.4 host loop: gate -> spawn -> verify -> retry/nudge caps.
   /// Sequencing law (payload_gate.hpp call-site contract): NO payload
   /// reaches SwarmSpawner::spawn unchecked; DESTRUCTIVE_PROPOSE_ONLY
@@ -175,7 +196,8 @@ class BrainLoop {
                           RetryPlanner planner = {},
                           PostconditionHook postcondition = {},
                           ReSolicitHook resolicit = {},
-                          int maxResolicits = 0);
+                          int maxResolicits = 0,
+                          ExecutionBinder bindExec = {});
 
   /// G2.4 solicit: ask the model for a tool payload under a
   /// response_format grammar (built from `tools`), then STRICT-parse

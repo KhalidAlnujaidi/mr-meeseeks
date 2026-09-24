@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
 
     std::vector<int> exitCodes;
     std::vector<std::string> dispositions;
-    int solicitFails = 0, spawns = 0, gateHolds = 0;
+    int solicitFails = 0, spawns = 0, gateHolds = 0, resolicits = 0;
     std::string lastOutput;
     // F72 layer 2 (promoted): the harness's own content verdict, computed
     // with the RUNTIME predicate engine. The referee re-judges the
@@ -261,7 +261,6 @@ int main(int argc, char** argv) {
         note(id + ": gate=" + gv.code + " hold (zero spawns)");
         break;  // gate held; further rounds would re-solicit the same probe
       }
-
       // Spawn in the ephemeral workspace; scope = sandbox files.
       SpawnOptions opt;
       opt.argv = {"/bin/sh", "-c", payload["args"].value("cmd", "false")};
@@ -271,75 +270,93 @@ int main(int argc, char** argv) {
         if (e.is_regular_file() && e.path().filename() != "golem-ledger.jsonl")
           opt.scopeFiles.push_back(e.path().string());
       }
-      SwarmSpawner spawner;
-      SpawnResult spRes;
+
+      // F72 layer 2 + F88, as the runtime hook: layer 2 must run IN the
+      // ephemeral workspace before runGatedTask cleans it, and that same
+      // window is the only chance to copy the artifacts back to the shared
+      // sandbox for the referee (F89 reads the sandbox, so losing them
+      // would look like a disagreement that has nothing to do with the
+      // harness under test).
+      BrainLoop::PostconditionHook postcond =
+          [gt = t.contains("ground_truth") ? t["ground_truth"] : json(),
+           &sandboxDir](const std::string& ws) {
+            PostconditionResult pc = checkPostcondition(ws, gt);
+            std::error_code cec;
+            for (const auto& e : fs::recursive_directory_iterator(ws, cec)) {
+              if (!e.is_regular_file(cec)) continue;
+              fs::path rel = fs::relative(e.path(), ws, cec);
+              if (cec || rel.empty() || rel.native()[0] == '.') continue;
+              fs::path dest = sandboxDir / rel;
+              fs::create_directories(dest.parent_path(), cec);
+              fs::copy_file(e.path(), dest, fs::copy_options::overwrite_existing,
+                            cec);
+            }
+            return pc;
+          };
+
+      // F72 part 2 (P3-b): on a verify failure the RUNTIME asks this hook
+      // for a fresh payload, instead of the runner re-asking on its own
+      // (which had no cap awareness). The hook owns the model call; the
+      // loop owns the gate and the I6/I7 ladder.
+      int hookCalls = 0;
+      auto resolicit = [&](const BrainLoop::FailureFeedback& fb)
+          -> std::optional<json> {
+        ++hookCalls;
+        // Rebuild the prompt from the task text only: no previous-round
+        // framing bleeds in (F73).
+        std::string rp = makePrompt(text, round, maxRounds);
+        rp += "\n\nYour previous command did not produce the required result.";
+        if (fb.postconditionEvaluated && !fb.postconditionOk &&
+            t.contains("ground_truth"))
+          rp += "\nThe result must be exactly: " + t["ground_truth"].dump();
+        BrainLoop::SolicitResult ns = brain.solicitToolPayload(rp, tools);
+        if (!ns.ok) {
+          ++solicitFails;
+          note(id + ": re-solicit parse failed (" + ns.formatError + ")");
+          return std::nullopt;  // no fresh payload => runtime replays
+        }
+        return ns.payload;
+      };
+
+      // The host's only lever for the I6 cap law is to actually supply a
+      // narrowed payload (the planner cannot rewrite argv, F20), so declare
+      // NarrowOrReroute while a re-solicit is still allowed; past that, the
+      // honest answer is FullScope and the runtime stops the lineage.
+      constexpr int kMaxResolicits = 1;
+      BrainLoop::RetryPlanner planner = [&](int, json&) -> RetryScope {
+        return hookCalls < kMaxResolicits ? RetryScope::NarrowOrReroute
+                                          : RetryScope::FullScope;
+      };
+
+      // F99: one definition of payload -> argv, used for the initial
+      // payload AND every re-solicited one. Without this the re-solicit
+      // hook would be a no-op: the loop would gate the fresh payload but
+      // re-run the original command.
+      auto bindExec = [](SpawnOptions& so, const json& pl) {
+        so.argv = {"/bin/sh", "-c", pl["args"].value("cmd", "false")};
+      };
+
+      BrainLoop::TaskReport rep;
       try {
-        spRes = spawner.spawn(opt);
+        rep = brain.runGatedTask(taskId, payload, opt, planner, postcond,
+                                 resolicit, kMaxResolicits, bindExec);
       } catch (const std::exception& e) {
         dispositions.push_back("spawn-error");
-        note(id + ": spawn-error " + e.what());
+        note(id + ": runGatedTask threw " + e.what());
         break;
       }
-      ++spawns;
-      exitCodes.push_back(spRes.exitCode);
-      dispositions.push_back(spRes.exitCode == 0 ? "executed" : "exit-nonzero");
-      lastOutput = (spRes.sanitizedStdout + spRes.sanitizedStderr).substr(0, 800);
-
-      // F72 layer 2 (RUNTIME, promoted): evaluate the task's ground_truth
-      // postcondition against the ACTUAL artifact IN THE WORKSPACE, before
-      // cleanup destroys it. This is the runtime's own predicate engine
-      // (dshlite::checkPostcondition) — the same code the library loop
-      // uses — so the harness no longer carries a second implementation
-      // that could disagree with the runtime about "content-verified".
-      // The referee still independently re-judges the sandbox (F89): this
-      // is the harness's own verdict, not a substitute for the firewall.
-      PostconditionResult post;
-      if (spRes.exitCode == 0 && t.contains("ground_truth")) {
-        try {
-          post = checkPostcondition(spRes.workspaceDir, t["ground_truth"]);
-        } catch (const std::exception& e) {
-          post.pass = false;
-          post.evaluated = true;
-          post.detail = std::string("postcondition threw: ") + e.what();
-        }
-      } else if (spRes.exitCode != 0) {
-        post.pass = false;
-        post.evaluated = true;
-        post.detail = "exit-code failed; content unchecked";
-      }
-      postcondEvaluated = post.evaluated;
-      postcondPass = post.pass;
-      postcondDetail = post.detail;
-
-      // F88: copy regular-file artifacts back to the shared sandbox so
-      // the referee sees the same artifact surface as persistent-cwd
-      // frameworks. Symlinked scope files were already written through.
-      for (const auto& e : fs::recursive_directory_iterator(spRes.workspaceDir, ec)) {
-        if (!e.is_regular_file(ec)) continue;
-        fs::path rel = fs::relative(e.path(), spRes.workspaceDir, ec);
-        if (ec || rel.empty() || rel.native()[0] == '.') continue;
-        fs::path dest = sandboxDir / rel;
-        fs::create_directories(dest.parent_path(), ec);
-        fs::copy_file(e.path(), dest, fs::copy_options::overwrite_existing, ec);
-      }
-      SwarmSpawner::cleanup(spRes.workspaceDir);
-
-      LedgerEvent vv;
-      vv.type = "verify";
-      vv.taskId = taskId;
-      vv.role = "reviewer";
-      // Layer-aware: exit0 alone is NOT "verified" here anymore.
-      vv.verdict = (spRes.exitCode == 0 && postcondPass) ? "pass" : "fail";
-      vv.detail = "exit=" + std::to_string(spRes.exitCode) +
-                  (post.evaluated ? (post.pass ? " postcond=pass"
-                                               : " postcond=FAIL")
-                                  : " postcond=none") +
-                  " " + post.detail;
-      ledger.append(vv);
-      note(id + ": round " + std::to_string(round) + " exit=" +
-           std::to_string(spRes.exitCode) +
-           (post.evaluated ? (post.pass ? " postcond=PASS" : " postcond=FAIL")
-                           : " postcond=none"));
+      spawns += rep.spawns;
+      if (rep.spawns == 0) ++gateHolds;
+      exitCodes.push_back(rep.verify.exitCode);
+      dispositions.push_back(rep.disposition);
+      resolicits += rep.resolicits;
+      lastOutput = rep.verify.detail;
+      postcondEvaluated = rep.postcondition.evaluated;
+      postcondPass = rep.postcondition.pass;
+      postcondDetail = rep.postcondition.detail;
+      note(id + ": round " + std::to_string(round) + " " +
+           rep.disposition + " exits=" + std::to_string(rep.verify.exitCode) +
+           " resolicits=" + std::to_string(rep.resolicits));
     }
 
     row["exit_codes"] = exitCodes;
@@ -350,6 +367,9 @@ int main(int argc, char** argv) {
     row["spawns"] = spawns;
     row["gate_holds"] = gateHolds;
     row["solicit_fails"] = solicitFails;
+    // F72 part 2: how many passes came from a RE-SOLICITED payload. A
+    // round-2 pass is a different claim from a round-1 pass.
+    row["resolicits"] = resolicits;
     row["wall_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - t0)
                           .count();

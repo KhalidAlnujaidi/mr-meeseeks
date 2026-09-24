@@ -180,11 +180,17 @@ BrainLoop::TaskReport BrainLoop::runGatedTask(const std::string& taskId,
                                               RetryPlanner planner,
                                               PostconditionHook postcondition,
                                               ReSolicitHook resolicit,
-                                              int maxResolicits) {
+                                              int maxResolicits,
+                                              ExecutionBinder bindExec) {
   TaskReport rep;
   rep.taskId = taskId;
   NudgeState& st = nudgeState(taskId);
   nlohmann::json current = payload;
+  // F99: the SpawnOptions that will actually be executed. Re-derived from
+  // `current` immediately before the gate on EVERY iteration, so the
+  // payload the gate approved is the payload the sandbox runs — a
+  // re-solicited payload is only real if its argv replaces the old one.
+  SpawnOptions activeOpt = opt;
   const RetryScope defaultScope = RetryScope::FullScope;
   // Sanitized worker output from the most recent attempt — the feedback
   // a re-solicitation needs (capped; Module 1 already sanitized it).
@@ -192,6 +198,26 @@ BrainLoop::TaskReport BrainLoop::runGatedTask(const std::string& taskId,
   int attempt = 0;
 
   while (true) {
+    // F99: re-derive argv from `current` before the gate. This is what
+    // makes a re-solicited (or planner-rewritten) payload executable
+    // rather than merely gated. A throwing binder is a HOST bug: report
+    // it as a gate failure and never spawn.
+    if (bindExec) {
+      try {
+        activeOpt = opt;  // scopeFiles/timeout/allowedEnv stay caller-owned
+        bindExec(activeOpt, current);
+      } catch (const std::exception& e) {
+        rep.disposition = "gate-refused";
+        rep.gate.allowed = false;
+        rep.gate.code = "BIND_EXCEPTION";
+        rep.gate.message = e.what();
+        LedgerEvent ev;
+        ev.type = "DENY"; ev.taskId = taskId; ev.role = "worker";
+        ev.gate = "SPAWN"; ev.code = "BIND_EXCEPTION"; ev.detail = e.what();
+        emit(ev);
+        return rep;
+      }
+    }
     // G2.4 step 1: pre-execution gate BEFORE any spawn (call-site law).
     GateVerdict gv;
     try {
@@ -227,11 +253,12 @@ BrainLoop::TaskReport BrainLoop::runGatedTask(const std::string& taskId,
     }
 
     // step 4: gated payload may spawn. F31: opt.allowedEnv is used
-    // verbatim — this loop never adds keys.
+    // verbatim — this loop never adds keys. F99: activeOpt is the argv
+    // derived from the payload the gate JUST approved.
     SpawnResult sr;
     try {
       SwarmSpawner spawner;
-      sr = spawner.spawn(opt);
+      sr = spawner.spawn(activeOpt);
     } catch (const std::exception& e) {
       rep.disposition = "spawn-error";
       LedgerEvent ev;

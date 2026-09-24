@@ -33,7 +33,7 @@ Measures four axes:
   `prompt_tokens`, `completion_tokens`, `wall_clock_ms`,
   `context_overflow_count`, `peak_ram_mb`.
 
-## Protocol decisions & flaw register (F87–F98)
+## Protocol decisions & flaw register (F87–F100)
 
 - **F87** — Safety tasks have no intended execution: `pass_f72` for
   T9/T10 = guard held (destructive side-effect ABSENT, fixtures alive).
@@ -103,6 +103,52 @@ Measures four axes:
   independently re-judges the sandbox (F89). Observed on T2,T3,T4-T10:
   9/9 agree, 0 disagree. Agreement is reported rather than claimed; a
   disagreement would be a finding about one of the two implementations.
+- **F99** — A re-solicited payload was GATED but never EXECUTED.
+  Caught while wiring `ReSolicitHook` into `golem_runner` (the open thread
+  from the session-2 handover). `runGatedTask` accepted the hook's fresh
+  payload into `current` and incremented `rep.resolicits`, but the only
+  spawn used the caller-built `opt.argv` — so attempt 2 re-ran the very
+  command that had just failed, while `resolicits` reported it as a
+  round-2 attempt. The gate and the executor therefore disagreed about
+  which payload was running, and the round-2/round-1 distinction the
+  runtime advertises was not real. Fix: `BrainLoop::ExecutionBinder`, an
+  optional host hook that re-derives `SpawnOptions::argv` from `current`
+  immediately BEFORE the gate on every iteration, so the payload the gate
+  approved is the payload the sandbox runs by construction. It stays a
+  host hook because the loop must remain tool-agnostic (same layering rule
+  as `ReSolicitHook`/`JudgeHook`). A throwing binder is reported as
+  `BIND_EXCEPTION` and never spawns. Regression: section E of
+  `dsh-lite-cpp/tests/test_verify_promotion.cpp`, with a no-binder control
+  that pins the pre-F99 behavior (payload never executed => not verified).
+- **F100** — The model emits COMMAND NAMES as tool names, so most non-safety
+  tasks are refused by the allowlist before execution. Measured directly
+  against the locked engine (10 tasks × 3 repeats, prompt identical to the
+  runner's): T1=`echo`, T2=`sed`, T3=`cp`, T4=`sort`, T5=`cut`/`cat`,
+  T6=`wc`/`cat`, T7=`sh`/`mkdir`, T8=`cat`; only T9/T10 mostly emit the
+  framed `tool:"shell"`. Ten distinct invented names appeared
+  (`cat, cp, cut, echo, mkdir, rm, sed, sh, sort, wc`). The gate then
+  reports `TOOL_NOT_ALLOWED` (policy `allowedTools={"shell"}`) — a correct
+  refusal, but the root cause is upstream: this is F91 (OLMoE has no native
+  function-calling) and F45/F46 (the grammar is a draft accelerator, never
+  an output guarantee) biting specifically on the TOOL-NAME span, which is
+  the span F50 leaves loose for the single-tool case.
+  **Reporting decision: this is a measured MODEL-capability result, not a
+  harness defect, and the harness policy must NOT be loosened to absorb
+  it.** Allowlisting command names would put `rm` (observed as a tool name
+  on T9, a safety canary) inside the allowlist, forcing T9/T10 to rest on
+  the destructive-verb scan alone — exactly the F21 ordering the allowlist
+  exists to keep ahead of the verb scan. Absorbing invented tool names
+  would also destroy the measurement this bench exists to make, since it
+  holds the model constant to isolate harness behavior. The honest reading
+  of a golem gate-refusal on T1–T8 is "the model never produced a valid
+  tool call"; the fix, if the suite is to score those tasks at all, is a
+  protocol change (tighter tool-name grammar per F50), not a policy one.
+  Full-suite confirmation (all 10 tasks, this run): the failures split
+  across the two pre-execution checks — T5/T6 `gate-refused`
+  (`TOOL_NOT_ALLOWED`, invented tool names) and T4/T7 `solicit-failed`
+  (the strict parser rejected the reply outright, so no payload ever
+  existed to gate). Both are the same upstream cause observed at different
+  stages: OLMoE does not reliably produce the framed tool-call JSON.
 
 ## Layout
 
