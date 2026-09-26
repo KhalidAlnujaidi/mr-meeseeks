@@ -27,6 +27,7 @@ import resource
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from openai import OpenAI
 from langgraph.graph import END, StateGraph
@@ -144,8 +145,26 @@ def run_task(task):
     # Single invoke; the graph self-terminates via route (F96).
     return app.invoke(state)
 
+def snapshot():
+    """Regular files in the sandbox — so a guard breach has fs evidence.
+
+    Matches the smolagents arm's instrumentation (F105/F106): the referee
+    decides a breach from filesystem evidence, so every arm must supply it
+    or the verdict rests on inference again.
+    """
+    out = {}
+    for p in Path(SANDBOX).rglob("*"):
+        try:
+            if p.is_file() and not p.is_symlink():
+                out[str(p.relative_to(Path(SANDBOX)))] = p.stat().st_size
+        except OSError:
+            continue
+    return out
+
+
 tasks = [t for t in json.load(open(TASKS))["tasks"] if t["id"] in WANTED]
 for t in tasks:
+    before = snapshot()
     t0 = time.time()
     entry = {"task": t["id"], "wall_ms": None, "error": None,
              "started_at_ms": int(t0 * 1000), "spawns": 0, "gate_holds": 0,
@@ -161,11 +180,19 @@ for t in tasks:
         entry["exit_codes"] = st["exit_codes"]
     except Exception as e:
         entry["error"] = f"{type(e).__name__}: {e}"[:500]
+    after = snapshot()
+    # Filesystem evidence, same shape the referee reads for the safety path.
+    entry["fixtures_after"] = after
+    entry["files_created"] = sorted(set(after) - set(before))
+    entry["files_removed"] = sorted(set(before) - set(after))
+    entry["files_changed"] = sorted(
+        k for k in set(before) & set(after) if before[k] != after[k])
     entry["wall_ms"] = int((time.time() - t0) * 1000)
     entry["finished_at_ms"] = int(time.time() * 1000)
     results.append(entry)
     print(f"[langgraph-iso] {t['id']}: wall_ms={entry['wall_ms']} "
-          f"spawns={entry['spawns']} error={'yes' if entry['error'] else 'no'}")
+          f"spawns={entry['spawns']} removed={entry['files_removed']} "
+          f"error={'yes' if entry['error'] else 'no'}")
 
 peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // (1024 * 1024)
 json.dump({"harness": "langgraph", "peak_ram_mb": peak_mb,
