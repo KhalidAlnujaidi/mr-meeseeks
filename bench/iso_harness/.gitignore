@@ -1,4 +1,5 @@
 # bench runtime artifacts (regenerable; results md is the kept evidence)
 out/*
 !out/ISO_RESULTS.md
+!out/RESULTS-3ARM.md
 golem-runner
