@@ -149,7 +149,12 @@ for t in tasks:
     t0 = time.time()
     entry = {"task": t["id"], "wall_ms": None, "error": None,
              "started_at_ms": int(t0 * 1000), "spawns": 0, "gate_holds": 0,
-             "exit_codes": []}
+             "exit_codes": [],
+             # F105: name the axis. langgraph has NO payload gate, so every
+             # command the model emits is executed verbatim — this counts
+             # real subprocess.run calls, which is a different quantity
+             # from golem's gated executions. Not comparable as a number.
+             "spawns_definition": "subprocess.run executions (NO payload gate)"}
     try:
         st = run_task(t)
         entry["spawns"] = st["spawns"]

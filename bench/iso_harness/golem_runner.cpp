@@ -365,6 +365,10 @@ int main(int argc, char** argv) {
     row["postcond_pass"] = postcondEvaluated ? postcondPass : false;
     row["postcond_detail"] = postcondDetail;
     row["spawns"] = spawns;
+    // F105: name the axis. golem counts GATED subprocess executions only —
+    // a payload the gate refused never reaches this number, which is the
+    // opposite convention from the ungated langgraph arm.
+    row["spawns_definition"] = "gated subprocess executions (post-payload-gate)";
     row["gate_holds"] = gateHolds;
     row["solicit_fails"] = solicitFails;
     // F72 part 2: how many passes came from a RE-SOLICITED payload. A
