@@ -30,6 +30,35 @@ code=$(curl -s -m 3 "http://127.0.0.1:$ENGINE_PORT/v1/models" -o /dev/null -w "%
 [ "$code" = "200" ] || { echo "engine not ready on :$ENGINE_PORT (got $code)"; exit 4; }
 if [ ! -x "$HERE/golem-runner" ]; then "$HERE/build_golem.sh" >&2; fi
 
+# F107: the Python arms need their frameworks, and a /tmp venv does not
+# survive (macOS clears /tmp). Fail loudly HERE rather than letting the
+# runner crash into a cell the referee cannot judge (F106). Only checked
+# for the arms actually being run, so a golem-only run needs no venv.
+need_py_arm=0
+case "$ARM" in smolagents|langgraph|all) need_py_arm=1 ;; esac
+if [ "$need_py_arm" = "1" ]; then
+  py="$VENV_PY"; [ "$ARM" = "langgraph" ] && py="$LG_PY"
+  if [ ! -x "$py" ]; then
+    echo "python arm interpreter not found: $py"
+    echo "  set VENV_PY / ISO_VENV_LANGGRAPH to a venv that has the frameworks."
+    echo "  NOTE (F107): do NOT put it in /tmp — macOS clears it."
+    exit 5
+  fi
+  case "$ARM" in
+    smolagents) mods="smolagents openai" ;;
+    langgraph)  mods="langgraph langchain_core openai" ;;
+    all)        mods="smolagents langgraph langchain_core openai" ;;
+  esac
+  for m in $mods; do
+    if ! "$py" -c "import $m" >/dev/null 2>&1; then
+      echo "python arm missing dependency '$m' in $py"
+      echo "  install it, or point VENV_PY / ISO_VENV_LANGGRAPH at a venv that has it."
+      exit 5
+    fi
+  done
+  echo "[preflight] python arm interpreter OK: $py ($mods)"
+fi
+
 IFS=',' read -ra TASK_LIST <<< "$IDS"
 
 run_arm() {
@@ -76,11 +105,15 @@ run_arm() {
       python3 "$HERE/referee.py" "$name" "$sandbox" "$HERE/tasks.json" \
         "$rout" "$plog" "$OUT/iso_benchmark.jsonl"
     else
-      # crashed before writing out.json: judge the cell from the filesystem
-      # alone (spawns unknown; safety tasks still judgeable, F87).
-      echo "[run] $name/$tid produced no out.json (rc=$rc) — referee judges filesystem only"
-      printf '{"harness":"%s","peak_ram_mb":-1,"results":[{"task":"%s","wall_ms":null,"spawns":0,"gate_holds":0,"exit_codes":[],"started_at_ms":0,"finished_at_ms":9999999999999}]}\n' \
-        "$name" "$tid" > "$rout.crashed"
+      # F106: crashed before writing out.json. Mark the row so the referee
+      # reports the cell as NOT-RUN rather than judging a stray filesystem.
+      # (Previously this synthesised spawns=0 + empty exits, which made a
+      # safety cell look like a held guard — "did not run" scored the same
+      # as "ran and refused". A cell that was never attempted is not a
+      # result in EITHER direction.)
+      echo "[run] $name/$tid produced no out.json (rc=$rc) — marking cell NOT-RUN (F106)"
+      printf '{"harness":"%s","peak_ram_mb":-1,"crashed":true,"crash_rc":%s,"results":[{"task":"%s","wall_ms":null,"spawns":0,"gate_holds":0,"exit_codes":[],"started_at_ms":0,"finished_at_ms":9999999999999}]}\n' \
+        "$name" "${rc:-1}" "$tid" > "$rout.crashed"
       python3 "$HERE/referee.py" "$name" "$sandbox" "$HERE/tasks.json" \
         "$rout.crashed" "$plog" "$OUT/iso_benchmark.jsonl"
     fi
