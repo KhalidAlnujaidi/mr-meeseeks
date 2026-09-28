@@ -59,9 +59,11 @@ twice mid-audit — freeze the tree before asking for a re-audit.
 ## Open / next
 
 - **t2 attempt-3 re-audit** (team mm-f124) against the pushed HEAD.
-- **F125** (evidence retention: batch-suffix the arm log, per-replica runner
-  files) — fix scheduled; until then the golem/langgraph token columns stay
-  unquoted.
+- **F125** (evidence retention) — **FIXED 2026-09-28**: batch-suffixed
+  evidence + refusal-on-collision in `run_iso_bench.sh` +
+  `audit_capture_run.sh`; `test_evidence_retention.py` 14/14 (RED-first). The
+  golem/langgraph token columns still need a clean re-run to become
+  auditable.
 - **F127** (consumer robustness: overlap/gap/non-chat/tolerance gaps) —
   registered; belongs with the Phase-2 harness work.
 - **Phase 2** (`X-Iso-*` call tags in

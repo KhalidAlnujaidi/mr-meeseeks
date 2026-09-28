@@ -5,7 +5,8 @@
 # model-id (default olmoe-leaf). Single-slot engine => strictly sequential
 # cells (F70/F93). Every harness×task cell gets: freshly seeded sandbox
 # (no cross-task contamination), then run, then IMMEDIATE referee judgment.
-# One proxy per ARM (shared log, windowed by ts_ms per task).
+# One proxy per ARM; its log is BATCH-SUFFIXED and never truncated (F125:
+# a re-run ADDS evidence files instead of overwriting a scored batch's).
 #
 # Usage: ./run_iso_bench.sh [golem|smolagents|langgraph|all] [task-ids-csv]
 #   task-ids-csv default: all 10 tasks
@@ -120,15 +121,24 @@ run_arm() {
   local name="$1"
   local pport=$((PROXY_BASE_PORT++))
   local sandbox="$OUT/sandbox-$name"
-  local plog="$OUT/proxy-$name.jsonl"
+  # F125: evidence filenames carry the batch, and a colliding batch name
+  # REFUSES below instead of truncating — `: >` on a shared name was how a
+  # later single-task run destroyed a scored batch's proxy log.
+  local plog="$OUT/proxy-$name-$ISO_RUN_BATCH.jsonl"
+  if [ -e "$plog" ]; then
+    echo "REFUSING: batch evidence already exists: $plog" >&2
+    echo "  (F125: a scored batch's raw evidence is never truncated or overwritten." >&2
+    echo "   Choose a new ISO_RUN_BATCH, or move the old files aside explicitly.)" >&2
+    return 1
+  fi
   : > "$plog"
 
   echo "=== iso arm: $name (proxy :$pport, tasks: $IDS, reps: $ISO_REPS, batch: $ISO_RUN_BATCH) ==="
-  python3 "$HERE/proxy.py" "$pport" "$ENGINE_PORT" "$plog" > "$OUT/proxy-$name.err" 2>&1 &
+  python3 "$HERE/proxy.py" "$pport" "$ENGINE_PORT" "$plog" > "$OUT/proxy-$name-$ISO_RUN_BATCH.err" 2>&1 &
   local proxy_pid=$!
   sleep 1
   curl -s -m 3 "http://127.0.0.1:$pport/v1/models" -o /dev/null || {
-    echo "proxy :$pport failed to start"; cat "$OUT/proxy-$name.err"; kill $proxy_pid || true; return 1; }
+    echo "proxy :$pport failed to start"; cat "$OUT/proxy-$name-$ISO_RUN_BATCH.err"; kill $proxy_pid || true; return 1; }
 
   # F114/F118: EXACTLY ONE OWNER of the replica loop per arm.
   #  - golem: the C++ runner iterates ISO_REPS INTERNALLY (one out.json
@@ -142,27 +152,37 @@ run_arm() {
   local first=1
   for rep in $(seq 1 "$shell_reps"); do
   export ISO_REPLICA=$((rep - 1))
+  # F125: python arms handle ONE replica per process — the runner file must
+  # carry the replica index or every rep overwrites the previous one (only
+  # the last survived, making all but one replica unauditable). Golem's file
+  # holds all replicas internally (F114), so it gets no rep token.
+  local rep_tag=""
+  [ "$name" != "golem" ] && rep_tag="-rep$ISO_REPLICA"
   for tid in "${TASK_LIST[@]}"; do
     python3 "$HERE/seed_sandbox.py" "$HERE/tasks.json" "$tid" "$sandbox"
-    local rout="$OUT/runner-$name-$tid.json"
-    rm -f "$rout"
+    local rout="$OUT/runner-$name-$tid$rep_tag-$ISO_RUN_BATCH.json"
+    if [ -e "$rout" ] || [ -e "$rout.crashed" ]; then
+      echo "REFUSING: evidence for batch $ISO_RUN_BATCH already exists: $rout" >&2
+      echo "  (F125: evidence is never overwritten — choose a new ISO_RUN_BATCH.)" >&2
+      return 1
+    fi
     local rc=0
     case "$name" in
       golem)
         ISO_WARMUP=$first run_scrubbed \
           "$HERE/golem-runner" "http://127.0.0.1:$pport/v1/chat/completions" "$MODEL_ID" \
           "$sandbox" "$HERE/tasks.json" "$rout" "$tid" \
-          > "$OUT/golem-$tid-stdout.log" 2>&1 || rc=$? ;;
+          > "$OUT/golem-$tid$rep_tag-$ISO_RUN_BATCH-stdout.log" 2>&1 || rc=$? ;;
       smolagents)
         ISO_WARMUP=$first run_scrubbed "$VENV_PY" "$HERE/smolagents_runner.py" \
           "http://127.0.0.1:$pport/v1" "$MODEL_ID" \
           "$sandbox" "$HERE/tasks.json" "$rout" "$tid" \
-          > "$OUT/smolagents-$tid-stdout.log" 2>&1 || rc=$? ;;
+          > "$OUT/smolagents-$tid$rep_tag-$ISO_RUN_BATCH-stdout.log" 2>&1 || rc=$? ;;
       langgraph)
         ISO_WARMUP=$first run_scrubbed "$LG_PY" "$HERE/langgraph_runner.py" \
           "http://127.0.0.1:$pport/v1" "$MODEL_ID" \
           "$sandbox" "$HERE/tasks.json" "$rout" "$tid" \
-          > "$OUT/langgraph-$tid-stdout.log" 2>&1 || rc=$? ;;
+          > "$OUT/langgraph-$tid$rep_tag-$ISO_RUN_BATCH-stdout.log" 2>&1 || rc=$? ;;
       *) echo "unknown arm: $name"; rc=2 ;;
     esac
     first=0

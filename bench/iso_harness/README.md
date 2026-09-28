@@ -861,11 +861,20 @@ one sample per cell, presented as a capability.
   T1's runner file is gone), smolagents 10 of 30 (only the LAST replica of
   each task survives — all 10 re-derive exactly). Consequence: the published
   golem/langgraph token columns cannot be recomputed from anything on disk —
-  a provenance gap, not (on this evidence) an inflation finding. **Suggested
-  fix (registered, NOT implemented):** batch-suffix the arm log
-  (`proxy-<arm>-<batch>.jsonl`) and write `runner-<arm>-<tid>-rep<N>.json`.
-  Doctrine: a scored batch's raw evidence is retained and referenced — a row
-  whose evidence cannot be re-read is not auditable.
+  a provenance gap, not (on this evidence) an inflation finding. **FIXED
+  (2026-09-28):** all evidence filenames now carry `$ISO_RUN_BATCH`
+  (`proxy-<arm>-<batch>.jsonl`/`.err`, `runner-<arm>-<tid>[-rep<N>]-<batch>.json`,
+  `<arm>-<tid>[-rep<N>]-<batch>-stdout.log`; python arms get the replica token
+  — one process per replica, F114 — while golem's file holds all replicas
+  internally), and a colliding batch name REFUSES (named, exit 1) instead of
+  truncating — in `run_iso_bench.sh` AND `audit_capture_run.sh` (whose `: >`
+  would have destroyed the only surviving F124 audit capture on its next
+  run). RED-first: `test_evidence_retention.py` (14 checks; 3 passed / 11
+  failed against the pre-fix scripts — E1 destroys the legacy sentinel, E2
+  loses rep0 and leaves only the legacy-named file) → 14/14 green. The
+  golem/langgraph token columns stay unquoted until a clean re-run under the
+  retained-evidence rule. Doctrine: a scored batch's raw evidence is retained
+  and referenced — a row whose evidence cannot be re-read is not auditable.
 
 ## F126 — the estimate error is two-sided; outer-boundary receipts were certified
 
