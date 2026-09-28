@@ -1,4 +1,20 @@
 # HANDOVER — profile: mm · session 2 (F72 promotion + iso bench)
+
+> **SUPERSEDED / CORRECTED 2026-09-28.** Two facts in this document are now
+> false and caused real confusion on 2026-09-28:
+> 1. The "commits ahead of origin/main (NOT pushed)" figure is stale. The repo
+>    is **pushed and level with `origin/main`** (branch `main`).
+> 2. The push target is **`KhalidAlnujaidi/mr-meeseeks`** - that is the main
+>    repo. **LeastGen/golem is dropped** and is not a configured remote.
+>
+> The architectural facts (section 5 in the mm handovers) remain accurate and
+> useful. The open-decisions lists are superseded: the iso harness was
+> committed and pushed, and the F112-F123 register work landed in commits
+> 22d7008, 1aef234, 8a268e2, e753ae8, 933f2a8.
+>
+> Kept as history rather than deleted, so the earlier reading survives and its
+> drift stays visible.
+
 Repo: /Users/khalid/dev/mr-meeseeks · branch main · **38 commits ahead of origin/main (NOT pushed)**
 Date: 2026-09-22 · Supersedes the "UNCOMMITTED work" section of HANDOVER-mm.md (session 1).
 Session 1 handover is still accurate for §2 commit chain up to 9622dc2 and for §5 architecture facts.

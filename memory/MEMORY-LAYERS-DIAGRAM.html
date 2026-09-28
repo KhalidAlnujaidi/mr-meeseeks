@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Layered Memory L0/L1/L2 — Architecture Diagram</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'JetBrains Mono', monospace; background: #020617; min-height: 100vh; padding: 2rem; color: white; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot { width: 12px; height: 12px; background: #22d3ee; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-left: 1.75rem; }
+    .diagram-container { background: rgba(15, 23, 42, 0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1.5rem; overflow-x: auto; }
+    svg { width: 100%; min-width: 900px; display: block; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 2rem; }
+    .card { background: rgba(15, 23, 42, 0.5); border-radius: 0.75rem; border: 1px solid #1e293b; padding: 1.25rem; }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.rose { background: #fb7185; }
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.75rem; }
+    .card li { margin-bottom: 0.375rem; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>Layered Memory L0 / L1 / L2</h1>
+      </div>
+      <p class="subtitle">DSH Budget-AGI · machine once · project once · chat private · live 2026-09-18</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1000 800">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="arrow-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" />
+          </marker>
+          <marker id="arrow-emerald" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#34d399" />
+          </marker>
+          <marker id="arrow-rose" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- Machine boundary -->
+        <rect x="20" y="50" width="960" height="600" rx="12" fill="rgba(251, 191, 36, 0.05)" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="32" y="70" fill="#fbbf24" font-size="10" font-weight="600">MACHINE · macOS · DSH web profile · Budget-AGI rule 8</text>
+
+        <!-- Project boundaries -->
+        <rect x="60" y="200" width="430" height="380" rx="8" fill="transparent" stroke="#fb7185" stroke-width="1" stroke-dasharray="4,4"/>
+        <text x="68" y="214" fill="#fb7185" font-size="8">PROJECT · leastgen-demo · ~/dev/leastgen-demo</text>
+        <rect x="510" y="200" width="430" height="380" rx="8" fill="transparent" stroke="#fb7185" stroke-width="1" stroke-dasharray="4,4"/>
+        <text x="518" y="214" fill="#fb7185" font-size="8">PROJECT · think-fast · ~/Desktop/think-fast</text>
+
+        <!-- Read arrows L0 -> L1 -->
+        <line x1="275" y1="172" x2="275" y2="226" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+        <text x="283" y="205" fill="#94a3b8" font-size="8">reads</text>
+        <line x1="725" y1="172" x2="725" y2="226" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+        <text x="733" y="205" fill="#94a3b8" font-size="8">reads</text>
+        <!-- L1 -> main loop -->
+        <line x1="275" y1="308" x2="275" y2="318" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+        <line x1="725" y1="308" x2="725" y2="318" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+        <!-- Members -> main loop (full-text reports, no cap) -->
+        <line x1="141" y1="390" x2="141" y2="382" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrow-rose)"/>
+        <line x1="271" y1="390" x2="271" y2="382" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrow-rose)"/>
+        <line x1="405" y1="390" x2="405" y2="382" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrow-rose)"/>
+        <line x1="591" y1="390" x2="591" y2="382" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrow-rose)"/>
+        <line x1="721" y1="390" x2="721" y2="382" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrow-rose)"/>
+        <line x1="855" y1="390" x2="855" y2="382" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrow-rose)"/>
+        <!-- L2 -> gate -->
+        <line x1="173" y1="512" x2="173" y2="522" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="376" y1="512" x2="376" y2="522" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="623" y1="512" x2="623" y2="522" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="826" y1="512" x2="826" y2="522" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <!-- Cross-project read-only -->
+        <line x1="508" y1="269" x2="492" y2="269" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5,5" marker-end="url(#arrow-cyan)"/>
+        <text x="500" y="261" fill="#22d3ee" font-size="7" text-anchor="middle">read-only</text>
+
+        <!-- L0 harness -->
+        <rect x="60" y="90" width="880" height="80" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="500" y="115" fill="white" font-size="12" font-weight="600" text-anchor="middle">L0 HARNESS · one notebook for the machine</text>
+        <text x="500" y="133" fill="#94a3b8" font-size="9" text-anchor="middle">~/.dsh/AGENTS.md · 4.3K · box 8.213.85.203 · tunnel dashboard-only · secrets rules</text>
+        <text x="500" y="149" fill="#fb7185" font-size="8" text-anchor="middle">every session reads it · nothing project-specific</text>
+
+        <!-- DEMO column -->
+        <rect x="80" y="230" width="390" height="78" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="275" y="252" fill="white" font-size="11" font-weight="600" text-anchor="middle">L1 BRAIN — demo</text>
+        <text x="275" y="268" fill="#94a3b8" font-size="9" text-anchor="middle">.dsh/brain/BRAIN.md · :8100</text>
+        <text x="275" y="284" fill="#94a3b8" font-size="9" text-anchor="middle">demo.leastgen.com · admin sidecar</text>
+        <text x="275" y="300" fill="#a78bfa" font-size="8" text-anchor="middle">shared by demo sessions only</text>
+
+        <rect x="80" y="320" width="390" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="275" y="343" fill="white" font-size="11" font-weight="600" text-anchor="middle">MAIN LOOP · Budget-AGI brain</text>
+        <text x="275" y="359" fill="#94a3b8" font-size="9" text-anchor="middle">frames · delegates · verifies</text>
+        <text x="275" y="373" fill="#fb7185" font-size="8" text-anchor="middle">reports land full-text · no cap = blowup</text>
+
+        <rect x="80" y="392" width="122" height="52" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="141" y="412" fill="white" font-size="11" font-weight="600" text-anchor="middle">member 1</text>
+        <text x="141" y="428" fill="#94a3b8" font-size="9" text-anchor="middle">Meeseeks team</text>
+        <rect x="210" y="392" width="122" height="52" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="271" y="412" fill="white" font-size="11" font-weight="600" text-anchor="middle">member 2</text>
+        <text x="271" y="428" fill="#94a3b8" font-size="9" text-anchor="middle">Meeseeks team</text>
+        <rect x="340" y="392" width="130" height="52" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="405" y="412" fill="white" font-size="11" font-weight="600" text-anchor="middle">member 3</text>
+        <text x="405" y="428" fill="#94a3b8" font-size="9" text-anchor="middle">Meeseeks team</text>
+
+        <rect x="80" y="456" width="187" height="56" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="173" y="477" fill="white" font-size="11" font-weight="600" text-anchor="middle">L2 chat A</text>
+        <text x="173" y="493" fill="#94a3b8" font-size="9" text-anchor="middle">private scratch</text>
+        <rect x="283" y="456" width="187" height="56" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="376" y="477" fill="white" font-size="11" font-weight="600" text-anchor="middle">L2 chat B</text>
+        <text x="376" y="493" fill="#94a3b8" font-size="9" text-anchor="middle">same L0+L1 · no leak</text>
+
+        <rect x="80" y="524" width="390" height="40" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="275" y="541" fill="white" font-size="11" font-weight="600" text-anchor="middle">PROMOTION GATE</text>
+        <text x="275" y="556" fill="#94a3b8" font-size="8" text-anchor="middle">propose checks · approve writes · secrets blocked</text>
+
+        <!-- THINK-FAST column -->
+        <rect x="530" y="230" width="390" height="78" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="725" y="252" fill="white" font-size="11" font-weight="600" text-anchor="middle">L1 BRAIN — think-fast</text>
+        <text x="725" y="268" fill="#94a3b8" font-size="9" text-anchor="middle">.dsh/brain/BRAIN.md · :8756</text>
+        <text x="725" y="284" fill="#94a3b8" font-size="9" text-anchor="middle">nginx + UFW · borrows demo pattern</text>
+        <text x="725" y="300" fill="#a78bfa" font-size="8" text-anchor="middle">reads demo L1 · never writes it</text>
+
+        <rect x="530" y="320" width="390" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="725" y="343" fill="white" font-size="11" font-weight="600" text-anchor="middle">MAIN LOOP · Budget-AGI brain</text>
+        <text x="725" y="359" fill="#94a3b8" font-size="9" text-anchor="middle">frames · delegates · verifies</text>
+        <text x="725" y="373" fill="#fb7185" font-size="8" text-anchor="middle">reports land full-text · no cap = blowup</text>
+
+        <rect x="530" y="392" width="122" height="52" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="591" y="412" fill="white" font-size="11" font-weight="600" text-anchor="middle">member 1</text>
+        <text x="591" y="428" fill="#94a3b8" font-size="9" text-anchor="middle">Meeseeks team</text>
+        <rect x="660" y="392" width="122" height="52" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="721" y="412" fill="white" font-size="11" font-weight="600" text-anchor="middle">member 2</text>
+        <text x="721" y="428" fill="#94a3b8" font-size="9" text-anchor="middle">Meeseeks team</text>
+        <rect x="790" y="392" width="130" height="52" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="855" y="412" fill="white" font-size="11" font-weight="600" text-anchor="middle">member 3</text>
+        <text x="855" y="428" fill="#94a3b8" font-size="9" text-anchor="middle">Meeseeks team</text>
+
+        <rect x="530" y="456" width="187" height="56" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="623" y="477" fill="white" font-size="11" font-weight="600" text-anchor="middle">L2 chat A</text>
+        <text x="623" y="493" fill="#94a3b8" font-size="9" text-anchor="middle">private scratch</text>
+        <rect x="733" y="456" width="187" height="56" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="826" y="477" fill="white" font-size="11" font-weight="600" text-anchor="middle">L2 chat B</text>
+        <text x="826" y="493" fill="#94a3b8" font-size="9" text-anchor="middle">same L0+L1 · no leak</text>
+
+        <rect x="530" y="524" width="390" height="40" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="725" y="541" fill="white" font-size="11" font-weight="600" text-anchor="middle">PROMOTION GATE</text>
+        <text x="725" y="556" fill="#94a3b8" font-size="8" text-anchor="middle">propose checks · approve writes · secrets blocked</text>
+
+        <!-- Bottom strip -->
+        <rect x="60" y="592" width="430" height="44" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="275" y="611" fill="white" font-size="11" font-weight="600" text-anchor="middle">PRUNER</text>
+        <text x="275" y="627" fill="#94a3b8" font-size="8" text-anchor="middle">cuts tool results &gt;8192 chars · ignores reports</text>
+        <rect x="510" y="592" width="430" height="44" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="725" y="611" fill="white" font-size="11" font-weight="600" text-anchor="middle">COMPACTION</text>
+        <text x="725" y="627" fill="#94a3b8" font-size="8" text-anchor="middle">fires at 80% window · then breaks cache</text>
+
+        <!-- Legend (outside all boundaries) -->
+        <text x="60" y="678" fill="white" font-size="10" font-weight="600">Legend</text>
+        <rect x="60" y="688" width="16" height="10" rx="2" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="82" y="696" fill="#94a3b8" font-size="8">L0 machine rules</text>
+        <rect x="220" y="688" width="16" height="10" rx="2" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="242" y="696" fill="#94a3b8" font-size="8">L1 project brain</text>
+        <rect x="380" y="688" width="16" height="10" rx="2" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="402" y="696" fill="#94a3b8" font-size="8">Main loop + members</text>
+        <rect x="560" y="688" width="16" height="10" rx="2" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="582" y="696" fill="#94a3b8" font-size="8">L2 private chat</text>
+        <rect x="720" y="688" width="16" height="10" rx="2" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="742" y="696" fill="#94a3b8" font-size="8">Gate / safety net</text>
+        <line x1="60" y1="712" x2="76" y2="712" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="82" y="715" fill="#94a3b8" font-size="8">Reads (free)</text>
+        <line x1="220" y1="712" x2="236" y2="712" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <text x="242" y="715" fill="#94a3b8" font-size="8">Reports (blowup)</text>
+        <rect x="380" y="704" width="16" height="10" rx="2" fill="transparent" stroke="#fb7185" stroke-width="1" stroke-dasharray="3,3"/>
+        <text x="402" y="712" fill="#94a3b8" font-size="8">Project boundary</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot cyan"></div>
+          <h3>Reads are free</h3>
+        </div>
+        <ul>
+          <li>• Every session reads L0 + own L1 at start</li>
+          <li>• think-fast also reads demo L1 (same box)</li>
+          <li>• ~15K total — never the blowup</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot emerald"></div>
+          <h3>Writes are gated</h3>
+        </div>
+        <ul>
+          <li>• L2 never auto-promotes</li>
+          <li>• propose checks, approve writes</li>
+          <li>• secrets blocked, durable facts only</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot rose"></div>
+          <h3>Blowup is live log</h3>
+        </div>
+        <ul>
+          <li>• 466M sessions · biggest 782K</li>
+          <li>• member steer is full-text, no cap</li>
+          <li>• pruner skips reports · compact at 80%</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="footer">
+      Layered Memory · mr-meeseeks/memory/ · 5 tests green · backup /tmp/budget-agi-backup-20260918.yml
+    </p>
+  </div>
+</body>
+</html>
