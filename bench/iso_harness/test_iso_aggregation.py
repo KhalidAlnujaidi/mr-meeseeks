@@ -42,6 +42,17 @@ def load_analyze(path=HERE / "analyze.py", src=None):
     return mod
 
 
+def render(mod):
+    """Read the report the module ACTUALLY wrote.
+
+    F122 made the destination follow the input (a fixture run writes beside the
+    fixture, not over the tracked report), so tests must read mod.dst rather
+    than assuming out/ISO_RESULTS.md.
+    """
+    d = mod.__dict__.get("dst")
+    return Path(d).read_text() if d else (HERE / "out/ISO_RESULTS.md").read_text()
+
+
 def write_rows(p, rows):
     p.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
 
@@ -81,7 +92,7 @@ one = tmp / "one.jsonl"
 write_rows(one, [row("golem", "T1", "file_ops", True),
                  row("langgraph", "T1", "file_ops", False)])
 mod = load_analyze(src=one)
-text = mod.__dict__["dst"].read_text() if hasattr(mod, "dst") else (HERE / "out/ISO_RESULTS.md").read_text()
+text = render(mod)
 check("B1 NOT ESTABLISHED header present with n=1", "NOT ESTABLISHED" in text, True)
 # three replicas per arm -> established
 three = tmp / "three.jsonl"
@@ -108,7 +119,7 @@ write_rows(safe, [
         safety_mechanism="gate-untested", verdict_detail="guard held"),
 ])
 mod = load_analyze(src=safe)
-text = (HERE / "out/ISO_RESULTS.md").read_text()
+text = render(mod)
 check("C1 gate appears as its own glyph", "🛡️ gate" in text, True)
 check("C2 breach appears as BREACH, not a plain pass/fail", "❌ BREACH" in text, True)
 check("C3 untested pass is labelled untested", "⚠️ untested" in text, True)
@@ -169,7 +180,7 @@ t2 = tmp / "t2.jsonl"
 write_rows(t2, [row("langgraph", "T7", "tool_chain", False, exit_codes=[0, 1],
                     verdict_detail="exit0=False (exit_codes=[0,1]) postcond=False: x")])
 mod = load_analyze(src=t2)
-text = (HERE / "out/ISO_RESULTS.md").read_text()
+text = render(mod)
 check("E1 mixed exit list is printed, not collapsed to a bool",
       "exit_codes=[0,1]" in text, True)
 
@@ -188,7 +199,7 @@ diag = [row("golem", "T1", "file_ops", True, run_batch="PROMIDENT", replica=i)
         for i in range(3)]
 write_rows(f120, meas + diag)
 mod = load_analyze(src=f120)
-text = (HERE / "out/ISO_RESULTS.md").read_text()
+text = render(mod)
 t1_line = [l for l in text.splitlines() if l.startswith("| T1")][0]
 # Old code: "| T1 (file_ops) | 5/6 | ..." -> F1/F2 go red.
 check("F1 golem/T1 cell excludes the diagnostic batch -> 2/3",

@@ -291,8 +291,14 @@ for h in harnesses:
                        f"pass_f72={r['pass_f72']}{mech}{batch} — {r['verdict_detail']}")
 out.append("")
 
-dst = HERE / "out/ISO_RESULTS.md"
-dst.parent.mkdir(exist_ok=True)
+# F122: the report destination must follow the INPUT, not the module. This
+# used to be HERE/"out/ISO_RESULTS.md" unconditionally, so any run over a
+# fixture (the regression tests feed synthetic rows) overwrote the tracked,
+# real report with fixture data — and the tests then read that clobbered file,
+# so a green suite could leave the committed artifact stale. Scoped to the
+# source path: stdout analysis of a fixture writes a sibling of the fixture.
+dst = (src.parent / "ISO_RESULTS.md") if len(sys.argv) > 1 else HERE / "out/ISO_RESULTS.md"
+dst.parent.mkdir(parents=True, exist_ok=True)
 dst.write_text("\n".join(out))
 print(f"wrote {dst}")
 print(f"verdict: {'ESTABLISHED' if established else 'NOT ESTABLISHED (F109)'}")

@@ -669,6 +669,37 @@ one sample per cell, presented as a capability.
   This is a boundary race in the RUNNER's bookkeeping, not in the audit script,
   and is recorded rather than papered over.
 
+## F122 — the report destination ignored the input, so tests overwrote the real artifact
+
+- **F122** — **A green regression suite could leave the committed report
+  stale, because `analyze.py` wrote to a FIXED path regardless of what it
+  read.** The destination was hard-coded `HERE/out/ISO_RESULTS.md`, where
+  `HERE` derives from the module's own location (not from the input argument).
+  The regression tests drive `analyze.py` over synthetic fixtures, so every
+  test run overwrote the **tracked** report with fixture data — and the tests
+  then read that clobbered file back (`test_iso_aggregation.py` reads
+  `out/ISO_RESULTS.md` at three check sites), so a suite could pass while the
+  real artifact was destroyed.
+
+  **How it surfaced:** the F120 commit shipped a 53-line `ISO_RESULTS.md`
+  generated from a 6-row T1/T2 fixture — totals `2/3 | not-run | not-run` —
+  which **contradicted the commit message and the README in the same commit**,
+  both of which said `15/30 | 9/30 | 6/30`. An independent verifier caught it
+  by checking the committed blob against a re-derivation from raw telemetry
+  instead of trusting the working tree.
+
+  **Fix:** the destination now follows the INPUT — when a path argument is
+  supplied, the report is written beside that input; only a bare in-tree run
+  writes `out/ISO_RESULTS.md`. A fixture run can no longer touch the tracked
+  artifact. Verified: running the suites now leaves `out/ISO_RESULTS.md`
+  byte-unchanged (md5 before == after), and a fixture run writes to a sibling
+  of the fixture.
+
+  **Lesson (same family as F120):** an analysis tool whose WRITE target is
+  decoupled from its READ target can silently corrupt a tracked artifact, and
+  a self-reading test suite will happily certify the corrupted result. The
+  output path is part of the interface.
+
 ## Layout
 
 ```
