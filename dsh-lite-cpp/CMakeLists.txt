@@ -90,6 +90,16 @@ target_link_libraries(g4-run PRIVATE dshlite)
 add_executable(h2h-ours tests/h2h_ours.cpp)
 target_link_libraries(h2h-ours PRIVATE dshlite)
 
+# Golem-on-enigma payload draft-rate bench (not a ctest member — needs a
+# LIVE engine). Measures how often the real solicitToolPayload->
+# parseStrictPayload->checkPayload path yields a gate-valid payload when
+# the engine family lacks grammar_payload (F46 fallback, unconstrained).
+#   ./build/payload-draft-run http://enigma:8000/v1/chat/completions \
+#                             qwen3.6-colibri 8
+# Prints a measured rate; never asserts one.
+add_executable(payload-draft-run tests/payload_draft_run.cpp)
+target_link_libraries(payload-draft-run PRIVATE dshlite)
+
 # C ABI feasibility spike: in-process greedy decode through Colibri's
 # public segment/edge C ABI (libcolibri_segment_edge.a) — no coli serve,
 # no Python, no HTTP. Not a ctest member: needs the real OLMoE model dir.
