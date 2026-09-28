@@ -50,21 +50,25 @@ F124 Phase 1 (receipt-time attribution) — call->row ownership is decided on
 REQUEST-RECEIPT time, never on the completion-side `ts_ms`:
   - `req_ts_ms` (proxy.py stamps it at receipt) when present — exact;
   - else `ts_ms - latency_ms` (the same receipt, reconstructed) — INFERRED,
-    with a one-sided error: floor(receipt) in {est, est+1} (ms flooring of
-    both stamps plus latency rounding; the proxy's two time() reads are
-    sub-ms apart). Consequences, used below:
-      * ANY receipt landing exactly on a SHARED row boundary
-        (finished_N == started_N+1, adjacent replicas on both sides) is
-        the tie the old window stole or dropped -> counted in
-        `tie_ambiguous`, NAMED as TIE(kind=attribution, ts=...,
-        candidates=[...]), and a trace verdict refuses exit 0 while any
-        remain (input verdicts are unaffected by tie resolution). The
-        half-open floor rule still assigns every call exactly one window
-        (partition-checked below), but the assignment is a truncation
-        coin-flip -- named, never silently certified.
-      * a receipt on a NON-shared boundary (outer span edge) is NAMED as
-        a boundary-ms receipt (sub-ms ordering unobservable from ms
-        stamps; Phase-2 call tags close this).
+    with a TWO-SIDED ±1 ms error: the true receipt floor is in
+    {est-1, est, est+1} (floor() of the ms sum and round() of the latency
+    can each go either way; verified by a 3M-draw simulation of the exact
+    proxy arithmetic — README F126). Consequences, used below:
+      * ANY inferred receipt within 1 ms of a row boundary — est == b-1
+        (the floor set {est-1..est+1} straddles b) or est == b (it
+        straddles b and b+1) — could floor to either side.
+      * On a SHARED boundary (finished_N == started_N+1) the candidates
+        are the two adjacent replicas: counted in `tie_ambiguous`, NAMED
+        as TIE(kind=attribution, ts=..., candidates=[...]).
+      * On an OUTER span edge (started_0 / finished_last) the ambiguity
+        is row-vs-orphan (the call could be a pre/post-span orphan):
+        NAMED as a boundary-ms receipt.
+      * A trace verdict refuses exit 0 while ANY of the above remains —
+        TRACE-NOT-CERTIFIABLE, exit 1, named, never silently certified
+        (input verdicts are unaffected by tie resolution). The half-open
+        floor rule still assigns every call exactly one window
+        (partition-checked below); Phase-2 call tags close the residual
+        ambiguity for future captures.
 Calls outside every row window (pre-roll warmup) are listed as orphans and
 excluded from replica traces — never silently dropped, never counted.
 
@@ -154,7 +158,7 @@ def main() -> int:
     if modes == {"exact"}:
         mode_label = "exact (req_ts_ms)"
     elif modes == {"inferred"}:
-        mode_label = "window-inferred (estimate: floor(receipt) in {est, est+1})"
+        mode_label = "window-inferred (estimate: true receipt floor in {est-1, est, est+1})"
     else:
         mode_label = "mixed (exact where req_ts_ms was logged)"
     print(f"attribution-mode={mode_label}")
@@ -171,23 +175,30 @@ def main() -> int:
         windows.append((rep, win))
 
     # Tie accounting. Boundaries = every row start and finish (touching rows
-    # share one ms value). Inferred est == b-1: floor set {b-1, b} straddles
-    # the boundary -> AMBIGUOUS; blocks trace certification. Exact req == b,
-    # or inferred est == b: the floor rule assigns to the later row
-    # deterministically, but the receipt sits in the boundary millisecond —
-    # NAMED as a boundary-ms receipt (sub-ms ordering is unobservable from ms
-    # stamps; Phase-2 call tags close this).
+    # share one ms value). Under the two-sided ±1 ms estimate error (see the
+    # module docstring): inferred est == b-1 or est == b is AMBIGUOUS and
+    # blocks trace certification (est == b-1 straddles b; est == b straddles
+    # b and b+1). A receipt ON a shared boundary is ambiguous for any mode
+    # (the socket-level receipt precedes the stamp by the sub-ms body-read
+    # gap). All of it is NAMED — ties and boundary-ms receipts below — and
+    # the trace gate refuses while any remains; Phase-2 call tags close this.
     boundaries = sorted({r["started_at_ms"] for r in rows}
                         | {r["finished_at_ms"] for r in rows})
     sorted_rows = sorted(rows, key=lambda r: r.get("replica", 0))
     ties, bms = [], []
     for e, a, m in att:
-        # A receipt exactly ON a shared boundary (finished_N == started_N+1)
-        # is the tie the old window stole or dropped: candidates are the
-        # adjacencies on both sides. The half-open floor rule still assigns
-        # every call exactly one window (checked below), but the assignment
-        # is a truncation coin-flip — NAMED, and a trace verdict refuses
-        # exit 0 while any remain.
+        # Ambiguity, two shapes (two-sided ±1 ms estimate error):
+        #  * a receipt exactly ON a shared boundary (finished_N ==
+        #    started_N+1) — the tie the old window stole or dropped;
+        #  * an INFERRED receipt one ms before any boundary (est == b-1:
+        #    the floor set {est-1..est+1} straddles b).
+        # Both are NAMED as TIE(kind=attribution, ...). A receipt exactly
+        # ON an OUTER span edge is row-vs-orphan ambiguous (it could be a
+        # pre/post-span orphan) — NAMED as a boundary-ms receipt below;
+        # BOTH classes block trace certification (see the gate). The
+        # half-open floor rule still assigns every call exactly one
+        # window (checked below), but the assignment is a truncation
+        # coin-flip — named, never silently certified.
         cands = sorted({rr.get("replica") for rr in sorted_rows
                         if rr["started_at_ms"] == a or rr["finished_at_ms"] == a})
         if len(cands) > 1 or (m == "inferred"
@@ -202,9 +213,10 @@ def main() -> int:
     print(f"tie_ambiguous: {len(ties)}"
           + (f" — {', '.join(t[0]['req_body'] and classify(t[0]['req_body']) + '@' + str(t[1]) for t in ties)}" if ties else ""))
     if bms:
-        print(f"boundary-ms receipts (floor rule assigns to the later row; "
-              f"sub-ms ordering unobservable from ms stamps until Phase-2 "
-              f"tags): {len(bms)} call(s) [{', '.join(bms)}]")
+        print(f"boundary-ms receipts (estimate within ±1 ms of a span edge: "
+              f"row-vs-orphan ownership unprovable from ms stamps — blocks "
+              f"certification until Phase-2 tags): {len(bms)} call(s) "
+              f"[{', '.join(bms)}]")
 
     # Attribution must be a PARTITION, not a hope: no call may be claimed by
     # two windows (identity, not dict equality — two byte-equal entries were
@@ -335,23 +347,25 @@ def main() -> int:
 
     # ---- F124 Phase 1: trace-certification gate ---------------------------
     # Input (base-solicit) verdicts do not depend on tie resolution; the
-    # TRACE verdict does: while any call/row tie is ambiguous, a trace
-    # identity — even a matching one — cannot be certified from stamps
-    # alone. Refuse loudly (exit 1) rather than print a verdict the evidence
-    # cannot carry.
+    # TRACE verdict does: while any call/row tie or boundary-ms receipt is
+    # ambiguous, a trace identity — even a matching one — cannot be certified
+    # from stamps alone. Refuse loudly (exit 1) rather than print a verdict
+    # the evidence cannot carry.
     input_varies = (None in tok.values() or len(set(tok.values())) != 1)
-    if ties:
+    if ties or bms:
+        extra = (f" + {len(bms)} boundary-ms receipt(s)" if bms else "")
         if input_varies:
             print("RESULT: PROMPT-VARIANT — the base solicitation body is "
                   "NOT byte-identical across replicas (input variance; it "
                   "does not depend on tie resolution). NOTE: the trace "
-                  f"check is NOT CERTIFIABLE — {len(ties)} ambiguous tie(s) "
-                  "named above.")
+                  f"check is NOT CERTIFIABLE — {len(ties)} ambiguous tie(s)"
+                  f"{extra} named above.")
         else:
             print(f"RESULT: TRACE-NOT-CERTIFIABLE — {len(ties)} call/row "
-                  "tie(s) remain ambiguous under receipt-time attribution "
-                  "(named above); prompt INPUTS are byte-identical, but the "
-                  "call traces cannot be certified from stamps alone.")
+                  f"tie(s){extra} remain ambiguous under receipt-time "
+                  "attribution (named above); prompt INPUTS are "
+                  "byte-identical, but the call traces cannot be certified "
+                  "from stamps alone.")
         for f in findings:
             print(" ", f)
         return 1

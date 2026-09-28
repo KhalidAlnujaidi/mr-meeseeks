@@ -66,11 +66,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         conn = http.client.HTTPConnection("127.0.0.1", ENGINE_PORT, timeout=300)
         headers = {k: v for k, v in self.headers.items()
                    if k.lower() not in ("host", "content-length", "connection")}
-        # F124 Phase 1: capture t_recv at REQUEST RECEIPT (before conn.request).
-        # This is the whole basis for receipt-time attribution: the current
-        # ts_ms (stamped AFTER the response write) true-ly measures completion,
-        # not receipt.  Leaving ts_ms untouched for legacy label continuity.
-        t_recv = time.time()
+        # F124 Phase 1: the receipt-side stamp is req_ts_ms below, taken from
+        # t0 (stamped at this _forward entry, immediately before the upstream
+        # request; the socket-level receipt precedes it by the sub-ms
+        # body-read gap). ts_ms stays completion-side, untouched, for legacy
+        # label continuity.
         conn.request(method, self.path, body=body, headers=headers)
         r = conn.getresponse()
         first_byte = None

@@ -17,6 +17,10 @@ Cases R1-R6 of DESIGN-F124-call-attribution.md section 5:
       completion 67/79/68, `calls claimed >1: {}`  (pre-F124: 427/565/565)
   R6  synthetic legacy variant (no req_ts_ms)  -> attribution-mode=window-
       inferred, tie_ambiguous: 2 NAMED, exit 1 — refuses to certify
+  R6f synthetic outer-edge variant (F126)      -> a receipt landing exactly
+      ON started_0 is row-vs-orphan ambiguous (est = f+1 is possible under
+      the two-sided ±1 ms bound): NAMED as boundary-ms, refuses exit 0
+      (pre-F126: certified PROMPT-IDENTICAL — a false certification)
 
 RED evidence (this file against the pre-F124 code): R1 prints [4,2,4] with the
 warmup inside replica 0 and a stolen call leading replica 2; R2 exits 1
@@ -24,6 +28,9 @@ TRACE-VARIANT; R3 exits 1 with ZERO manufactured findings (all 3 deleted) but
 refuses certification via the single NAMED shared-boundary tie; R5 sums
 427/565/565; R6 has no attribution-mode line (the capability did not exist).
 R4's verdict (TRACE-VARIANT) is the same before and after the fix.
+R6f (added with the F126 hardening) fails against the pre-F126 code: the
+outer-edge fixture certified `PROMPT-IDENTICAL (raw)` exit 0 while the
+boundary receipt's row-vs-orphan ownership is unprovable from stamps.
 
 Run: ~/.golem-iso-venv/bin/python test_call_attribution.py
 """
@@ -221,6 +228,42 @@ check("R6c the tie is NAMED with its boundary",
 check("R6d exit 1 — no certification while a tie is unresolved", rc, 1)
 check("R6e no PROMPT-IDENTICAL verdict is printed",
       "RESULT: PROMPT-IDENTICAL" in o, False)
+
+print()
+print("=== R6f. outer-edge receipt (row-vs-orphan ambiguity) — F126 ===")
+# The estimate error is TWO-SIDED (±1 ms): est = f+1 is possible for a true
+# receipt floor f. A receipt whose estimate lands exactly ON an outer span
+# edge (started_0) could therefore truly be a PRE-SPAN ORPHAN; naming it
+# boundary-ms while certifying the trace is a false certification (F126,
+# found by the second verifier's outer-edge fixture). It must refuse.
+out_edge = tmp / "outer-edge"
+out_edge.mkdir()
+rows_oe = {"harness": "golem", "results": [
+    {"task": "T10", "replica": i, "started_at_ms": 1000 + 1000 * i,
+     "finished_at_ms": 2000 + 1000 * i, "wall_ms": 1000, "spawns": 0,
+     "gate_holds": 0, "exit_codes": [], "files_created": [],
+     "files_removed": []} for i in range(3)]}
+(out_edge / "runner.json").write_text(json.dumps(rows_oe))
+calls_oe = [
+    (1001, 1, WARMUP, 20, 2, None),      # est 1000 == started_0 (outer edge)
+    (1500, 10, SOLICIT, 91, 26, None),
+    (1700, 10, RETRY, 158, 22, None),
+    (2010, 1, WARMUP, 20, 2, None),      # est 2009 -> replica 1
+    (2500, 10, SOLICIT, 91, 45, None),
+    (2700, 10, RETRY, 158, 14, None),
+    (3010, 1, WARMUP, 20, 2, None),      # est 3009 -> replica 2
+    (3500, 10, SOLICIT, 91, 29, None),
+    (3700, 10, RETRY, 158, 20, None),
+]
+(out_edge / "proxy.jsonl").write_text(
+    "".join(json.dumps(entry(*c)) + "\n" for c in calls_oe))
+rc, o = audit(out_edge / "runner.json", out_edge / "proxy.jsonl")
+check("R6f the outer-edge receipt is NAMED as boundary-ms",
+      ("boundary-ms receipts" in o and "[warmup@1000]" in o), True)
+check("R6f2 row-vs-orphan ambiguity refuses certification "
+      "(pre-F126: exit 0 + PROMPT-IDENTICAL — false certification)",
+      (rc, "RESULT: TRACE-NOT-CERTIFIABLE" in o,
+       "RESULT: PROMPT-IDENTICAL" in o), (1, True, False))
 
 print()
 print(f"=== {passed} passed, {failed} failed, {skipped} skipped ===")
