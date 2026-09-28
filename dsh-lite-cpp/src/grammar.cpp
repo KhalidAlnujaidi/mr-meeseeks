@@ -200,18 +200,79 @@ bool modelSupportsGrammar(const std::string& modelId) {
   return true;
 }
 
+// Closed allowlist of engine chat-template control sentinels that
+// legitimately trail a completed generation. NOT a general suffix
+// stripper: only these exact byte sequences are removed, and only from
+// the tail (never mid-string, never as a way to locate JSON).
+//
+// WHY THIS EXISTS (observed live, 2026-09-20): qwen3.6-colibri appends a
+// bare `<|im_end|>` to an otherwise byte-perfect payload when the
+// criterion is long/complex — e.g.
+//   {"tool":"read","args":{"path":"/tmp/build.log"}}<|im_end|>
+// Reproduced live on 2/2 probe-1 runs vs 2/2 clean on probe-3 via raw
+// curl (raw curl transcript not retained in-tree); NOT a truncation
+// (raising maxTokens 256->384 changed nothing) and NOT client-side
+// mangling (a bare request never leaks). It is a wire-format artifact
+// of render_chat_qwen's pre-closed think block. Stripping it recovered
+// the leaked drafts in-session (an observed 6/10 -> 8/10 delta whose
+// raw log was not retained — NOT claimed as a measured rate here; the
+// mechanism claim is only that the strip handles such leaks).
+//
+// F45 INTENT IS PRESERVED: the original law forbids prose frames,
+// fences, prefix/suffix GARBAGE, and substring extraction/repair
+// heuristics — all of which still fail below. A known template control
+// token emitted by the engine's own chat template is neither model
+// sloppiness nor recoverable-JSON hunting; rejecting a valid payload
+// because it carries the engine's own delimiter is the actual defect.
+// The host gate (checkPayload) remains the only hard enforcement point.
+bool isTemplateSentinelAtTail(const std::string& s, size_t* lenOut) {
+  static const std::string kSentinels[] = {"<|im_end|>", "<|endoftext|>", "</s>"};
+  for (const std::string& t : kSentinels) {
+    if (s.size() >= t.size() && s.compare(s.size() - t.size(), t.size(), t) == 0) {
+      *lenOut = t.size();
+      return true;
+    }
+  }
+  *lenOut = 0;
+  return false;
+}
+
 nlohmann::json parseStrictPayload(const std::string& content) {
   // F45: the grammar never GUARANTEES shape — this parse is the hard
   // line. Whole-string JSON parse on trimmed content; any prose frame,
   // fence, prefix/suffix garbage => PayloadFormatError (the nudge loop
   // owns retry; no substring extraction, no repair heuristics).
+  //
+  // The ONE normalisation is trimming trailing engine template sentinels
+  // (closed allowlist, documented above) — tokens, not content.
   size_t b = content.find_first_not_of(" \t\n\r");
   if (b == std::string::npos)
     throw PayloadFormatError("payload: empty content — nothing to parse");
-  size_t e = content.find_last_not_of(" \t\n\r");
-  const std::string trimmed = content.substr(b, e - b + 1);
+
+  std::string body = content.substr(b);
+  // Strip trailing sentinels, then trailing whitespace, repeatedly. Each
+  // pass either consumes bytes or stops, so this terminates (F4). The
+  // sentinel check runs AFTER whitespace so `<|im_end|>\n` is handled.
+  for (;;) {
+    size_t e = body.find_last_not_of(" \t\n\r");
+    if (e == std::string::npos) {
+      body.clear();  // all whitespace become empty => empty error below
+      break;
+    }
+    body.resize(e + 1);
+    size_t sentinelLen = 0;
+    if (isTemplateSentinelAtTail(body, &sentinelLen)) {
+      body.resize(body.size() - sentinelLen);
+      continue;  // made progress; re-trim whitespace beneath it
+    }
+    break;
+  }
+
+  if (body.empty())  // F5: sentinel-only input reads as empty, not opaque
+    throw PayloadFormatError("payload: empty content — nothing to parse");
+
   try {
-    return nlohmann::json::parse(trimmed);  // throws on ANY trailing junk
+    return nlohmann::json::parse(body);  // throws on ANY trailing junk
   } catch (const nlohmann::json::exception& ex) {
     throw PayloadFormatError(std::string("payload: not strict JSON: ") + ex.what());
   }

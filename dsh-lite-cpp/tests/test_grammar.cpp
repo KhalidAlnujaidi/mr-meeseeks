@@ -403,6 +403,80 @@ int main() {
     check(j["tool"] == "shell", "7: clean payload with surrounding whitespace parses");
   }
 
+  // ── 7b. template-sentinel tail tolerance (measured 2026-09-20) ─────
+  // qwen3.6-colibri appends a bare `<|im_end|>` to an otherwise perfect
+  // payload on long criteria. REGRESSION GUARD: every "recovers" case
+  // below THREW PayloadFormatError before the tail-trim, and the F45
+  // laws must still hold — hence both halves of this section.
+  //
+  // NOTE ON STYLE: the success cases are wrapped in try/catch rather
+  // than left bare. On the OLD code they throw, and an uncaught throw
+  // aborts the whole suite (rc=134) instead of reporting a legible
+  // [FAIL] line — which would hide every later section from the report.
+  {
+    // Helper: parse-or-report. Keeps a regression failure legible.
+    auto parses = [](const std::string& in, nlohmann::json* out) {
+      try { *out = parseStrictPayload(in); return true; }
+      catch (const PayloadFormatError&) { return false; }
+    };
+    auto throws = [](const std::string& in, std::string* msg = nullptr) {
+      try { (void)parseStrictPayload(in); return false; }
+      catch (const PayloadFormatError& ex) {
+        if (msg) *msg = ex.what();
+        return true;
+      }
+    };
+    nlohmann::json j;
+    std::string msg;
+
+    // The exact live leak, byte for byte from the enigma run.
+    const bool a = parses(
+        "{\"tool\":\"read\",\"args\":{\"path\":\"/tmp/build.log\"}}<|im_end|>", &j);
+    check(a && j["tool"] == "read" && j["args"]["path"] == "/tmp/build.log",
+          "7b: trailing <|im_end|> stripped, payload recovered");
+
+    // Whitespace AFTER the sentinel must also work (strip order).
+    check(parses("{\"tool\":\"shell\",\"args\":{}}<|im_end|>\n  ", &j) &&
+              j["tool"] == "shell",
+          "7b: <|im_end|> followed by whitespace/newline stripped");
+
+    // Repeated sentinels: must terminate and still recover (F4).
+    check(parses("{\"tool\":\"shell\"}<|im_end|><|im_end|>", &j) &&
+              j["tool"] == "shell",
+          "7b: repeated trailing sentinels stripped (terminates)");
+
+    // Other allowlisted sentinels.
+    check(parses("{\"tool\":\"shell\"}</s>", &j) && j["tool"] == "shell",
+          "7b: </s> stripped");
+    check(parses("{\"tool\":\"shell\"}<|endoftext|>", &j) && j["tool"] == "shell",
+          "7b: <|endoftext|> stripped");
+
+    // F3: a sentinel INSIDE args is CONTENT, never stripped.
+    check(parses("{\"tool\":\"bash\",\"args\":{\"cmd\":\"echo <|im_end|>\"}}", &j) &&
+              j["args"]["cmd"] == "echo <|im_end|>",
+          "7b: mid-string sentinel preserved as content (tail-only strip)");
+
+    // F45 INTENT STILL HOLDS: unknown trailing junk is NOT a sentinel.
+    check(throws("{\"tool\":\"shell\"}<|im_start|>"),
+          "7b: non-allowlisted template token still REJECTED (closed list)");
+    check(throws("{\"tool\":\"shell\"} <|im_end|> extra"),
+          "7b: sentinel followed by junk still REJECTED (tail-only)");
+
+    // F2: sentinel stripping must NOT become prefix/prose tolerance.
+    check(throws("Here is the call: <|im_end|>{\"tool\":\"shell\"}"),
+          "7b: leading sentinel + prose still REJECTED (no prefix repair)");
+
+    // F5: sentinel-only input reports EMPTY, not an opaque parse error.
+    msg.clear();
+    check(throws("<|im_end|>", &msg) && msg.find("empty") != std::string::npos,
+          "7b: sentinel-only input => empty-content error");
+
+    // Fenced JSON stays rejected even with a sentinel appended — the
+    // allowlist must not smuggle in fence stripping.
+    check(throws("```json\n{\"tool\":\"shell\"}\n```<|im_end|>"),
+          "7b: fenced JSON + sentinel still REJECTED (no fence strip)");
+  }
+
   // ── 8. solicitToolPayload composition ─────────────────────────────
   {
     FakePoster fake;
