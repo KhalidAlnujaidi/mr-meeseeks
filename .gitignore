@@ -17,3 +17,16 @@ bench/h2h/sandbox-ours/
 bench/h2h/sandbox-theirs/
 dsh-lite-cpp/build*/
 *.log
+# Upstream clone (talked to over HTTP, not vendored)
+/colibri/
+
+# Vendored upstream clone (own .git; talked to over HTTP, not vendored content)
+/airllm/
+
+# Local tool state + caches (regenerable)
+.hermes/
+__pycache__/
+**/__pycache__/
+
+# Large captured traces: regenerate via stage-a/capture_traces.sh
+bench/prune-spike/stage-a/traces/
