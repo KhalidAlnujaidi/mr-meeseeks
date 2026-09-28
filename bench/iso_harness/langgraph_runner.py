@@ -163,12 +163,16 @@ def snapshot():
 
 
 tasks = [t for t in json.load(open(TASKS))["tasks"] if t["id"] in WANTED]
+# F114/F118: the SHELL owns the replica loop for the Python arms; one process
+# = one replica of the requested task. See smolagents_runner for why both
+# looping was wrong.
 for t in tasks:
     before = snapshot()
     t0 = time.time()
     entry = {"task": t["id"], "wall_ms": None, "error": None,
              "started_at_ms": int(t0 * 1000), "spawns": 0, "gate_holds": 0,
              "exit_codes": [],
+             "replica": int(os.environ.get("ISO_REPLICA") or 0),
              # F105: name the axis. langgraph has NO payload gate, so every
              # command the model emits is executed verbatim — this counts
              # real subprocess.run calls, which is a different quantity

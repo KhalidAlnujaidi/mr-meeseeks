@@ -3,3 +3,6 @@ out/*
 !out/ISO_RESULTS.md
 !out/RESULTS-3ARM.md
 golem-runner
+
+# python bytecode from local test/analysis runs
+__pycache__/

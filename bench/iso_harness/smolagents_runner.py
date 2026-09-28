@@ -108,6 +108,10 @@ def snapshot():
     return out
 
 
+# F114/F118: the SHELL owns the replica loop for the Python arms (each
+# process handles exactly one replica of the requested task), so this runner
+# must NOT loop internally. Both looping produced ISO_REPS^2 executions per
+# cell with the referee judging results out of a shared out.json.
 for t in tasks:
     # Fixtures are seeded by the orchestrator into SANDBOX before each
     # task (fresh dir per harness×task, run_iso_bench.sh).
@@ -122,6 +126,8 @@ for t in tasks:
     entry = {"task": t["id"], "wall_ms": None, "error": None, "final": None,
              "started_at_ms": started_ms, "spawns": 0, "gate_holds": 0,
              "exit_codes": [],
+             # F114/F118: one process = one replica; the shell sets this.
+             "replica": int(os.environ.get("ISO_REPLICA") or 0),
              # F105: name the axis so the three arms cannot be conflated.
              "spawns_definition": "in-process code executions (executor calls + shelled subprocesses)"}
     try:

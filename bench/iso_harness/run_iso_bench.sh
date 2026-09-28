@@ -61,6 +61,16 @@ fi
 
 IFS=',' read -ra TASK_LIST <<< "$IDS"
 
+# F109: replicas of the same cell. n=1 was how a 2-cell gap between arms got
+# published as a ranking; ISO_REPS>1 gives the referee a k/n per cell. Each
+# replica gets a FRESHLY SEEDED sandbox, so a replica is an independent
+# attempt, not a second pass over the previous one's leftovers.
+ISO_REPS="${ISO_REPS:-1}"
+# Every judged row carries the batch it came from, so a re-run ADDS samples
+# instead of overwriting them (F111).
+ISO_RUN_BATCH="${ISO_RUN_BATCH:-$(date -u +%Y%m%dT%H%M%SZ)}"
+export ISO_REPS ISO_RUN_BATCH
+
 run_arm() {
   local name="$1"
   local pport=$((PROXY_BASE_PORT++))
@@ -68,14 +78,25 @@ run_arm() {
   local plog="$OUT/proxy-$name.jsonl"
   : > "$plog"
 
-  echo "=== iso arm: $name (proxy :$pport, tasks: $IDS) ==="
+  echo "=== iso arm: $name (proxy :$pport, tasks: $IDS, reps: $ISO_REPS, batch: $ISO_RUN_BATCH) ==="
   python3 "$HERE/proxy.py" "$pport" "$ENGINE_PORT" "$plog" > "$OUT/proxy-$name.err" 2>&1 &
   local proxy_pid=$!
   sleep 1
   curl -s -m 3 "http://127.0.0.1:$pport/v1/models" -o /dev/null || {
     echo "proxy :$pport failed to start"; cat "$OUT/proxy-$name.err"; kill $proxy_pid || true; return 1; }
 
+  # F114/F118: EXACTLY ONE OWNER of the replica loop per arm.
+  #  - golem: the C++ runner iterates ISO_REPS INTERNALLY (one out.json
+  #    holding all replicas), so the shell runs it once per task.
+  #  - Python arms: each process handles ONE replica, so the SHELL loops and
+  #    passes the index down as ISO_REPLICA.
+  # Both looping produced ISO_REPS^2 executions per cell (measured: 60 rows
+  # for a 30-row target, then the loop restarted from T1).
+  local shell_reps=1
+  [ "$name" != "golem" ] && shell_reps="$ISO_REPS"
   local first=1
+  for rep in $(seq 1 "$shell_reps"); do
+  export ISO_REPLICA=$((rep - 1))
   for tid in "${TASK_LIST[@]}"; do
     python3 "$HERE/seed_sandbox.py" "$HERE/tasks.json" "$tid" "$sandbox"
     local rout="$OUT/runner-$name-$tid.json"
@@ -117,6 +138,7 @@ run_arm() {
       python3 "$HERE/referee.py" "$name" "$sandbox" "$HERE/tasks.json" \
         "$rout.crashed" "$plog" "$OUT/iso_benchmark.jsonl"
     fi
+  done
   done
 
   kill $proxy_pid 2>/dev/null || true; wait $proxy_pid 2>/dev/null || true

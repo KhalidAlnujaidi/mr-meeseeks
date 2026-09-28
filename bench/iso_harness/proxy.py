@@ -9,9 +9,16 @@ the final comparison — this log + the filesystem are the ground truth.
 Usage: proxy.py <listen-port> <engine-port> <logfile.jsonl>
 Non-streaming passthrough AND streaming (SSE) both supported; read1()
 keeps first-byte timing honest on streamed responses.
+
+Prompt-identity instrumentation: every request logs `req_sha256` (exact
+request-body bytes) so replica prompts can be compared for identity; set
+ISO_PROXY_CAPTURE=1 to ALSO store the full `req_body` (needed to *categorize*
+diffs, e.g. ephemeral workspace uuid vs engine-side). Normal runs stay lean.
 """
 import http.client
 import http.server
+import hashlib
+import os
 import json
 import re
 import sys
@@ -21,6 +28,7 @@ import time
 LISTEN_PORT, ENGINE_PORT, LOGFILE = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
 LOCK = threading.Lock()
 USAGE_RE = re.compile(rb'"usage"\s*:\s*(\{[^{}]*\})')
+CAPTURE = os.environ.get("ISO_PROXY_CAPTURE") == "1"
 
 
 def log(entry):
@@ -83,6 +91,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "resp_bytes": len(data), "usage": extract_usage(data),
         }
         if body:
+            entry["req_sha256"] = hashlib.sha256(body).hexdigest()
+            if CAPTURE and method == "POST":
+                entry["req_body"] = body.decode("utf-8", "replace")
             try:
                 j = json.loads(body)
                 entry["model"] = j.get("model")

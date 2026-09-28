@@ -181,15 +181,21 @@ int main(int argc, char** argv) {
   }
 
   json results = json::array();
+  // F109: replicas of the SAME cell. n=1 was how a 2-cell gap between arms
+  // got published as a ranking; ISO_REPS>1 lets the referee aggregate a
+  // cell as k/n instead of one greedy rollout per (arm, task).
+  const int reps = std::max(1, std::atoi(std::getenv("ISO_REPS") ? std::getenv("ISO_REPS") : "1"));
+  for (int replica = 0; replica < reps; ++replica)
   for (const auto& t : tasksDoc["tasks"]) {
     const std::string id = t["id"];
     if (std::find(wanted.begin(), wanted.end(), id) == wanted.end()) continue;
     const std::string text = t["text"];
     const int maxRounds = t.value("max_rounds", 1);
-    note(id + ": " + text);
+    note(id + ": " + text + (reps > 1 ? " [rep " + std::to_string(replica + 1) + "/" + std::to_string(reps) + "]" : ""));
 
     json row;
     row["task"] = id;
+    row["replica"] = replica;
     const auto wallStart = std::chrono::system_clock::now();
     const auto t0 = std::chrono::steady_clock::now();
     row["started_at_ms"] =
@@ -387,6 +393,23 @@ int main(int argc, char** argv) {
   json out;
   out["harness"] = "golem";
   out["peak_ram_mb"] = peakRssMb();
+  // F114: the runner owns the replica loop for this arm, but the shell
+  // invokes it once PER TASK (one out.json per task). Appending here keeps
+  // that shape while still letting a single invocation carry ISO_REPS
+  // replicas of the requested task(s). Without this the second shell-style
+  // call clobbered the first task's rows.
+  {
+    std::ifstream in(outPath);
+    if (in.good()) {
+      try {
+        json prev = json::parse(in);
+        for (auto& r : prev.value("results", json::array()))
+          results.push_back(r);
+        out["peak_ram_mb"] = std::max(out["peak_ram_mb"].get<int>(),
+                                      prev.value("peak_ram_mb", 0));
+      } catch (const std::exception&) { /* unreadable prior file: ignore */ }
+    }
+  }
   out["results"] = results;
   std::ofstream o(outPath);
   o << out.dump(1) << "\n";
