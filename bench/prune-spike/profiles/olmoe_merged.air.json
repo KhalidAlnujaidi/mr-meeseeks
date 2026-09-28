@@ -1,0 +1,24 @@
+{
+  "name": "olmoe_merged_air",
+  "engine": "olmoe",
+  "binary": "~/colibri/c/olmoe",
+  "args": ["64", "8"],
+  "model": "~/models/olmoe_merged",
+  "out": "olmoe_merged",
+  "layers": 16,
+  "experts": 64,
+  "norm_topk_prob": false,
+  "heat": "chat_loop",
+  "eval": "ppl_tf_nll",
+  "threads": 8,
+  "tensor_res": [
+    "model\\.layers\\.(\\d+)\\.mlp\\.experts\\.(\\d+)\\.merged_weight$"
+  ],
+  "arms": {
+    "base": "~/models/olmoe_merged",
+    "cold": "~/bench/arms/olmoe_tier220",
+    "rand": "~/bench/arms/olmoe_uniform",
+    "ctl":  "~/bench/arms/olmoe_control"
+  },
+  "notes": "Cross-HOST replication of the published #1621 arm set on a second Apple Silicon machine (M3 MacBook Air, 8 cores, 16GB). usage.txt/eval refs are the published files (main() olmoe_merged reuse block copies them); --steps cands,uniform re-derives the candidate lists deterministically (same tier cut, seed 1972), so the zeroed expert sets are byte-identical to the published run. Only host, threads, and arm paths differ. Run: cands,uniform,build,eval,report. Expect deltas equal to published to 4 decimals if the protocol is host-independent."
+}

@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "hypothesis": "Zeroing the 220 experts whose routing counts are below 0.1% of their layer (0.66% of traffic at 12M picks) leaves end-to-end decode speed unchanged (warm, page-cached) while degrading quality; if speed is unchanged, count-cold experts are not free to remove for performance reasons, and the quality delta measures their causal value.",
+  "commit": "a8f2ca623ffe9de9df11d56f34d11d2d501493d3",
+  "model": "OLMoE-1B-7B-0125-Instruct, colibri merged int8 container (6.9 GB, 16 layers x 64 experts, top-8, norm_topk_prob=false); baseline container vs same container with 220 expert merged_weight tensors zeroed via safetensors round-trip (control arm proved round-trip loss-free: TF-NLL bit-identical to baseline)",
+  "command": "make -C c olmoe; bash paired_speed.sh (warm-up x1 per container, then ABABAB interleaved: SNAP=<container> PPL=1 ./olmoe 64 8 eval_ref_1.json, OMP_NUM_THREADS=12); quality: python3 tier_eval.py (202-token teacher-forced NLL, 2 reps, all four arms)",
+  "prompt_hash": "0b69362b5bf8d78d9f47e803b9d0feb9bf81e5e1c9e915064f5b2820c668d025",
+  "hardware": {
+    "cpu": "Apple M5 Pro, 18 logical cores, 12 OMP threads",
+    "ram": "24 GB unified memory (containers 6.9 GB, warm page-cache after untimed warm-up)",
+    "storage": "internal Apple SSD, APFS; no O_DIRECT; identical file layout and byte counts in both containers",
+    "os": "macOS 26.5.1 (Darwin 25.5.1), Apple clang 21, Homebrew libomp, arm64 default build"
+  },
+  "warmup_runs": 1,
+  "changed_variables": ["ablated_expert_set"],
+  "baseline": {
+    "config": {
+      "ablated_expert_set": "none",
+      "engine_build": "make -C c olmoe @ a8f2ca6, default flags",
+      "cap": "64",
+      "threads": "12",
+      "prompt": "eval_ref_1.json (202 scored held-out agentic-traffic tokens, sha in prompt_hash)",
+      "mode": "PPL=1 teacher-forced, cache fully warm",
+      "cache_state": "warm (one untimed run per container before the timed block)"
+    },
+    "samples": { "tok_s": [12.20, 13.85, 15.66] },
+    "median_tok_s": 13.85,
+    "quality": {
+      "method": "TF-NLL bit-stability across reps (3.8370 x3) + round-trip control container TF-NLL-identical to pristine baseline",
+      "passed": true
+    },
+    "evidence": {
+      "uri": "file:///Users/khalid/dev/mr-meeseeks/bench/prune-spike/paired_speed_warm.log (baseline lines)",
+      "sha256": "9adf74f548ebc0c2ab60dca6668267209e88bea568578e3b338c074170748086"
+    }
+  },
+  "trial": {
+    "config": {
+      "ablated_expert_set": "cold_tail_220 (candidates_full.txt: 218 experts below 0.1% of layer traffic + 2 zero-route; weights zeroed, byte layout unchanged)",
+      "engine_build": "make -C c olmoe @ a8f2ca6, default flags",
+      "cap": "64",
+      "threads": "12",
+      "prompt": "eval_ref_1.json (202 scored held-out agentic-traffic tokens, sha in prompt_hash)",
+      "mode": "PPL=1 teacher-forced, cache fully warm",
+      "cache_state": "warm (one untimed run per container before the timed block)"
+    },
+    "samples": { "tok_s": [14.41, 13.94, 15.74] },
+    "median_tok_s": 14.41,
+    "quality": {
+      "method": "TF-NLL bit-stability across reps (4.0857 x3, vs baseline 3.8370: +0.2487 nats/token, +30% ppl); ablation verified as exactly-220-zeroed by per-tensor audit",
+      "passed": true
+    },
+    "evidence": {
+      "uri": "file:///Users/khalid/dev/mr-meeseeks/bench/prune-spike/paired_speed_warm.log (t220 lines); raw NLL: file:///Users/khalid/dev/mr-meeseeks/bench/prune-spike/tier_eval_results.json",
+      "sha256": "833505589bc0185920b24a3dac0741d5c1ed036329881fd5e0a2893727336ec3"
+    }
+  },
+  "outcome": "no-change"
+}

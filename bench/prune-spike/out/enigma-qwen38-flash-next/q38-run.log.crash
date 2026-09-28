@@ -1,0 +1,345 @@
+[drv] Sun Sep 20 08:58:24 AM +03 2026 waiting for hf download...
+[drv] Sun Sep 20 08:58:34 AM +03 2026 download done: 131 shards, 185563844671 bytes
+[drv] Sun Sep 20 08:58:34 AM +03 2026 fixtures
+wrote 12 /home/enigma/bench/prune-spike/runs/qwen38_flash_next/heat_ref_*.json from /home/enigma/bench/prune-spike/runs/qwen38_flash_next/corpus.txt (18 lines avail)
+wrote 3 /home/enigma/bench/prune-spike/runs/qwen38_flash_next/eval_ref_*.json from /home/enigma/bench/prune-spike/runs/qwen38_flash_next/corpus.txt (18 lines avail)
+[drv] Sun Sep 20 08:58:34 AM +03 2026 heat (60 PPL prefills, COLI_USAGE accumulating)
+[drv] Sun Sep 20 10:01:42 AM +03 2026 cands + uniform
+layers 48 x experts 512 | total routed picks 2,920,320
+  layer  0: picks  60,840 | used 469/512 | zero-route 43 | <0.1% tail 142 | hottest    549
+  layer  1: picks  60,840 | used 491/512 | zero-route 21 | <0.1% tail 224 | hottest    744
+  layer  2: picks  60,840 | used 487/512 | zero-route 25 | <0.1% tail 204 | hottest  1,064
+  layer  3: picks  60,840 | used 483/512 | zero-route 29 | <0.1% tail 288 | hottest  1,835
+  layer  4: picks  60,840 | used 479/512 | zero-route 33 | <0.1% tail 268 | hottest  2,031
+  layer  5: picks  60,840 | used 480/512 | zero-route 32 | <0.1% tail 249 | hottest  1,652
+  layer  6: picks  60,840 | used 492/512 | zero-route 20 | <0.1% tail 248 | hottest  1,106
+  layer  7: picks  60,840 | used 483/512 | zero-route 29 | <0.1% tail 224 | hottest    931
+  layer  8: picks  60,840 | used 474/512 | zero-route 38 | <0.1% tail 246 | hottest  1,388
+  layer  9: picks  60,840 | used 479/512 | zero-route 33 | <0.1% tail 280 | hottest  1,390
+  layer 10: picks  60,840 | used 486/512 | zero-route 26 | <0.1% tail 232 | hottest  1,056
+  layer 11: picks  60,840 | used 481/512 | zero-route 31 | <0.1% tail 274 | hottest  1,188
+  layer 12: picks  60,840 | used 471/512 | zero-route 41 | <0.1% tail 220 | hottest  1,512
+  layer 13: picks  60,840 | used 484/512 | zero-route 28 | <0.1% tail 241 | hottest  1,142
+  layer 14: picks  60,840 | used 486/512 | zero-route 26 | <0.1% tail 264 | hottest  1,568
+  layer 15: picks  60,840 | used 490/512 | zero-route 22 | <0.1% tail 338 | hottest  3,923
+  layer 16: picks  60,840 | used 485/512 | zero-route 27 | <0.1% tail 318 | hottest  1,922
+  layer 17: picks  60,840 | used 483/512 | zero-route 29 | <0.1% tail 248 | hottest  1,194
+  layer 18: picks  60,840 | used 467/512 | zero-route 45 | <0.1% tail 222 | hottest    882
+  layer 19: picks  60,840 | used 477/512 | zero-route 35 | <0.1% tail 252 | hottest  1,846
+  layer 20: picks  60,840 | used 483/512 | zero-route 29 | <0.1% tail 257 | hottest  1,340
+  layer 21: picks  60,840 | used 491/512 | zero-route 21 | <0.1% tail 255 | hottest    991
+  layer 22: picks  60,840 | used 491/512 | zero-route 21 | <0.1% tail 235 | hottest  1,038
+  layer 23: picks  60,840 | used 490/512 | zero-route 22 | <0.1% tail 299 | hottest  1,744
+  layer 24: picks  60,840 | used 475/512 | zero-route 37 | <0.1% tail 244 | hottest  1,439
+  layer 25: picks  60,840 | used 476/512 | zero-route 36 | <0.1% tail 264 | hottest  1,338
+  layer 26: picks  60,840 | used 482/512 | zero-route 30 | <0.1% tail 236 | hottest  1,047
+  layer 27: picks  60,840 | used 475/512 | zero-route 37 | <0.1% tail 265 | hottest  1,516
+  layer 28: picks  60,840 | used 479/512 | zero-route 33 | <0.1% tail 232 | hottest  2,044
+  layer 29: picks  60,840 | used 490/512 | zero-route 22 | <0.1% tail 244 | hottest  1,036
+  layer 30: picks  60,840 | used 480/512 | zero-route 32 | <0.1% tail 251 | hottest  1,900
+  layer 31: picks  60,840 | used 485/512 | zero-route 27 | <0.1% tail 328 | hottest  3,906
+  layer 32: picks  60,840 | used 483/512 | zero-route 29 | <0.1% tail 305 | hottest  1,951
+  layer 33: picks  60,840 | used 483/512 | zero-route 29 | <0.1% tail 243 | hottest  1,373
+  layer 34: picks  60,840 | used 492/512 | zero-route 20 | <0.1% tail 237 | hottest  1,166
+  layer 35: picks  60,840 | used 476/512 | zero-route 36 | <0.1% tail 260 | hottest  1,937
+  layer 36: picks  60,840 | used 467/512 | zero-route 45 | <0.1% tail 254 | hottest  1,360
+  layer 37: picks  60,840 | used 468/512 | zero-route 44 | <0.1% tail 252 | hottest    991
+  layer 38: picks  60,840 | used 491/512 | zero-route 21 | <0.1% tail 230 | hottest    970
+  layer 39: picks  60,840 | used 472/512 | zero-route 40 | <0.1% tail 315 | hottest  2,615
+  layer 40: picks  60,840 | used 489/512 | zero-route 23 | <0.1% tail 317 | hottest  2,614
+  layer 41: picks  60,840 | used 482/512 | zero-route 30 | <0.1% tail 294 | hottest  2,927
+  layer 42: picks  60,840 | used 438/512 | zero-route 74 | <0.1% tail 229 | hottest  1,581
+  layer 43: picks  60,840 | used 459/512 | zero-route 53 | <0.1% tail 289 | hottest  2,150
+  layer 44: picks  60,840 | used 442/512 | zero-route 70 | <0.1% tail 267 | hottest  1,939
+  layer 45: picks  60,840 | used 430/512 | zero-route 82 | <0.1% tail 250 | hottest  2,584
+  layer 46: picks  60,840 | used 440/512 | zero-route 72 | <0.1% tail 248 | hottest  2,004
+  layer 47: picks  60,840 | used 446/512 | zero-route 66 | <0.1% tail 246 | hottest  2,253
+
+candidates: 1694 zero-route + 12328 below 0.1% = 14022/24576 (57.1% of container)
+wrote /home/enigma/bench/prune-spike/runs/qwen38_flash_next/candidates_cold.txt
+cold 7.85% vs uniform 56.81% traffic, overlap 7980
+[drv] Sun Sep 20 10:01:42 AM +03 2026 eval (seq_arms: build->eval->delete per arm)
+  eval_ref_1.json base: 2.4701
+  eval_ref_2.json base: 3.1249
+  eval_ref_3.json base: 3.2926
+pipeline-control arm: full round-trip, nothing zeroed
+  model-00001-of-00131.safetensors: zeroed 0
+  model-00002-of-00131.safetensors: zeroed 0
+  model-00003-of-00131.safetensors: zeroed 0
+  model-00004-of-00131.safetensors: zeroed 0
+  model-00005-of-00131.safetensors: zeroed 0
+  model-00006-of-00131.safetensors: zeroed 0
+  model-00007-of-00131.safetensors: zeroed 0
+  model-00008-of-00131.safetensors: zeroed 0
+  model-00009-of-00131.safetensors: zeroed 0
+  model-00010-of-00131.safetensors: zeroed 0
+  model-00011-of-00131.safetensors: zeroed 0
+  model-00012-of-00131.safetensors: zeroed 0
+  model-00013-of-00131.safetensors: zeroed 0
+  model-00014-of-00131.safetensors: zeroed 0
+  model-00015-of-00131.safetensors: zeroed 0
+  model-00016-of-00131.safetensors: zeroed 0
+  model-00017-of-00131.safetensors: zeroed 0
+  model-00018-of-00131.safetensors: zeroed 0
+  model-00019-of-00131.safetensors: zeroed 0
+  model-00020-of-00131.safetensors: zeroed 0
+  model-00021-of-00131.safetensors: zeroed 0
+  model-00022-of-00131.safetensors: zeroed 0
+  model-00023-of-00131.safetensors: zeroed 0
+  model-00024-of-00131.safetensors: zeroed 0
+  model-00025-of-00131.safetensors: zeroed 0
+  model-00026-of-00131.safetensors: zeroed 0
+  model-00027-of-00131.safetensors: zeroed 0
+  model-00028-of-00131.safetensors: zeroed 0
+  model-00029-of-00131.safetensors: zeroed 0
+  model-00030-of-00131.safetensors: zeroed 0
+  model-00031-of-00131.safetensors: zeroed 0
+  model-00032-of-00131.safetensors: zeroed 0
+  model-00033-of-00131.safetensors: zeroed 0
+  model-00034-of-00131.safetensors: zeroed 0
+  model-00035-of-00131.safetensors: zeroed 0
+  model-00036-of-00131.safetensors: zeroed 0
+  model-00037-of-00131.safetensors: zeroed 0
+  model-00038-of-00131.safetensors: zeroed 0
+  model-00039-of-00131.safetensors: zeroed 0
+  model-00040-of-00131.safetensors: zeroed 0
+  model-00041-of-00131.safetensors: zeroed 0
+  model-00042-of-00131.safetensors: zeroed 0
+  model-00043-of-00131.safetensors: zeroed 0
+  model-00044-of-00131.safetensors: zeroed 0
+  model-00045-of-00131.safetensors: zeroed 0
+  model-00046-of-00131.safetensors: zeroed 0
+  model-00047-of-00131.safetensors: zeroed 0
+  model-00048-of-00131.safetensors: zeroed 0
+  model-00049-of-00131.safetensors: zeroed 0
+  model-00050-of-00131.safetensors: zeroed 0
+  model-00051-of-00131.safetensors: zeroed 0
+  model-00052-of-00131.safetensors: zeroed 0
+  model-00053-of-00131.safetensors: zeroed 0
+  model-00054-of-00131.safetensors: zeroed 0
+  model-00055-of-00131.safetensors: zeroed 0
+  model-00056-of-00131.safetensors: zeroed 0
+  model-00057-of-00131.safetensors: zeroed 0
+  model-00058-of-00131.safetensors: zeroed 0
+  model-00059-of-00131.safetensors: zeroed 0
+  model-00060-of-00131.safetensors: zeroed 0
+  model-00061-of-00131.safetensors: zeroed 0
+  model-00062-of-00131.safetensors: zeroed 0
+  model-00063-of-00131.safetensors: zeroed 0
+  model-00064-of-00131.safetensors: zeroed 0
+  model-00065-of-00131.safetensors: zeroed 0
+  model-00066-of-00131.safetensors: zeroed 0
+  model-00067-of-00131.safetensors: zeroed 0
+  model-00068-of-00131.safetensors: zeroed 0
+  model-00069-of-00131.safetensors: zeroed 0
+  model-00070-of-00131.safetensors: zeroed 0
+  model-00071-of-00131.safetensors: zeroed 0
+  model-00072-of-00131.safetensors: zeroed 0
+  model-00073-of-00131.safetensors: zeroed 0
+  model-00074-of-00131.safetensors: zeroed 0
+  model-00075-of-00131.safetensors: zeroed 0
+  model-00076-of-00131.safetensors: zeroed 0
+  model-00077-of-00131.safetensors: zeroed 0
+  model-00078-of-00131.safetensors: zeroed 0
+  model-00079-of-00131.safetensors: zeroed 0
+  model-00080-of-00131.safetensors: zeroed 0
+  model-00081-of-00131.safetensors: zeroed 0
+  model-00082-of-00131.safetensors: zeroed 0
+  model-00083-of-00131.safetensors: zeroed 0
+  model-00084-of-00131.safetensors: zeroed 0
+  model-00085-of-00131.safetensors: zeroed 0
+  model-00086-of-00131.safetensors: zeroed 0
+  model-00087-of-00131.safetensors: zeroed 0
+  model-00088-of-00131.safetensors: zeroed 0
+  model-00089-of-00131.safetensors: zeroed 0
+  model-00090-of-00131.safetensors: zeroed 0
+  model-00091-of-00131.safetensors: zeroed 0
+  model-00092-of-00131.safetensors: zeroed 0
+  model-00093-of-00131.safetensors: zeroed 0
+  model-00094-of-00131.safetensors: zeroed 0
+  model-00095-of-00131.safetensors: zeroed 0
+  model-00096-of-00131.safetensors: zeroed 0
+  model-00097-of-00131.safetensors: zeroed 0
+  model-00098-of-00131.safetensors: zeroed 0
+  model-00099-of-00131.safetensors: zeroed 0
+  model-00100-of-00131.safetensors: zeroed 0
+  model-00101-of-00131.safetensors: zeroed 0
+  model-00102-of-00131.safetensors: zeroed 0
+  model-00103-of-00131.safetensors: zeroed 0
+  model-00104-of-00131.safetensors: zeroed 0
+  model-00105-of-00131.safetensors: zeroed 0
+  model-00106-of-00131.safetensors: zeroed 0
+  model-00107-of-00131.safetensors: zeroed 0
+  model-00108-of-00131.safetensors: zeroed 0
+  model-00109-of-00131.safetensors: zeroed 0
+  model-00110-of-00131.safetensors: zeroed 0
+  model-00111-of-00131.safetensors: zeroed 0
+  model-00112-of-00131.safetensors: zeroed 0
+  model-00113-of-00131.safetensors: zeroed 0
+  model-00114-of-00131.safetensors: zeroed 0
+  model-00115-of-00131.safetensors: zeroed 0
+  model-00116-of-00131.safetensors: zeroed 0
+  model-00117-of-00131.safetensors: zeroed 0
+  model-00118-of-00131.safetensors: zeroed 0
+  model-00119-of-00131.safetensors: zeroed 0
+  model-00120-of-00131.safetensors: zeroed 0
+  model-00121-of-00131.safetensors: zeroed 0
+  model-00122-of-00131.safetensors: zeroed 0
+  model-00123-of-00131.safetensors: zeroed 0
+  model-00124-of-00131.safetensors: zeroed 0
+  model-00125-of-00131.safetensors: zeroed 0
+  model-00126-of-00131.safetensors: zeroed 0
+  model-00127-of-00131.safetensors: zeroed 0
+  model-00128-of-00131.safetensors: zeroed 0
+  model-00129-of-00131.safetensors: zeroed 0
+  model-00130-of-00131.safetensors: zeroed 0
+  model-00131-of-00131.safetensors: zeroed 0
+DONE: zeroed 0/0 expert tensors -> /home/enigma/models/q38_tier_ctl
+  eval_ref_1.json  ctl: 2.4701
+  eval_ref_2.json  ctl: 3.1249
+  eval_ref_3.json  ctl: 3.2926
+14022 candidate experts to zero
+  model-00001-of-00131.safetensors: zeroed 0
+  model-00002-of-00131.safetensors: zeroed 370
+  model-00003-of-00131.safetensors: zeroed 185
+  model-00004-of-00131.safetensors: zeroed 490
+  model-00005-of-00131.safetensors: zeroed 245
+  model-00006-of-00131.safetensors: zeroed 0
+  model-00007-of-00131.safetensors: zeroed 0
+  model-00008-of-00131.safetensors: zeroed 0
+  model-00009-of-00131.safetensors: zeroed 0
+  model-00010-of-00131.safetensors: zeroed 0
+  model-00011-of-00131.safetensors: zeroed 0
+  model-00012-of-00131.safetensors: zeroed 0
+  model-00013-of-00131.safetensors: zeroed 0
+  model-00014-of-00131.safetensors: zeroed 0
+  model-00015-of-00131.safetensors: zeroed 0
+  model-00016-of-00131.safetensors: zeroed 0
+  model-00017-of-00131.safetensors: zeroed 0
+  model-00018-of-00131.safetensors: zeroed 0
+  model-00019-of-00131.safetensors: zeroed 0
+  model-00020-of-00131.safetensors: zeroed 0
+  model-00021-of-00131.safetensors: zeroed 0
+  model-00022-of-00131.safetensors: zeroed 0
+  model-00023-of-00131.safetensors: zeroed 0
+  model-00024-of-00131.safetensors: zeroed 0
+  model-00025-of-00131.safetensors: zeroed 0
+  model-00026-of-00131.safetensors: zeroed 0
+  model-00027-of-00131.safetensors: zeroed 0
+  model-00028-of-00131.safetensors: zeroed 0
+  model-00029-of-00131.safetensors: zeroed 0
+  model-00030-of-00131.safetensors: zeroed 0
+  model-00031-of-00131.safetensors: zeroed 0
+  model-00032-of-00131.safetensors: zeroed 0
+  model-00033-of-00131.safetensors: zeroed 0
+  model-00034-of-00131.safetensors: zeroed 0
+  model-00035-of-00131.safetensors: zeroed 0
+  model-00036-of-00131.safetensors: zeroed 0
+  model-00037-of-00131.safetensors: zeroed 0
+  model-00038-of-00131.safetensors: zeroed 516
+  model-00039-of-00131.safetensors: zeroed 258
+  model-00040-of-00131.safetensors: zeroed 610
+  model-00041-of-00131.safetensors: zeroed 305
+  model-00042-of-00131.safetensors: zeroed 522
+  model-00043-of-00131.safetensors: zeroed 261
+  model-00044-of-00131.safetensors: zeroed 538
+  model-00045-of-00131.safetensors: zeroed 269
+  model-00046-of-00131.safetensors: zeroed 580
+  model-00047-of-00131.safetensors: zeroed 290
+  model-00048-of-00131.safetensors: zeroed 720
+  model-00049-of-00131.safetensors: zeroed 360
+  model-00050-of-00131.safetensors: zeroed 690
+  model-00051-of-00131.safetensors: zeroed 345
+  model-00052-of-00131.safetensors: zeroed 554
+  model-00053-of-00131.safetensors: zeroed 277
+  model-00054-of-00131.safetensors: zeroed 534
+  model-00055-of-00131.safetensors: zeroed 267
+  model-00056-of-00131.safetensors: zeroed 574
+  model-00057-of-00131.safetensors: zeroed 287
+  model-00058-of-00131.safetensors: zeroed 458
+  model-00059-of-00131.safetensors: zeroed 229
+  model-00060-of-00131.safetensors: zeroed 0
+  model-00061-of-00131.safetensors: zeroed 572
+  model-00062-of-00131.safetensors: zeroed 286
+  model-00063-of-00131.safetensors: zeroed 552
+  model-00064-of-00131.safetensors: zeroed 276
+  model-00065-of-00131.safetensors: zeroed 512
+  model-00066-of-00131.safetensors: zeroed 256
+  model-00067-of-00131.safetensors: zeroed 642
+  model-00068-of-00131.safetensors: zeroed 321
+  model-00069-of-00131.safetensors: zeroed 562
+  model-00070-of-00131.safetensors: zeroed 281
+  model-00071-of-00131.safetensors: zeroed 600
+  model-00072-of-00131.safetensors: zeroed 300
+  model-00073-of-00131.safetensors: zeroed 532
+  model-00074-of-00131.safetensors: zeroed 266
+  model-00075-of-00131.safetensors: zeroed 604
+  model-00076-of-00131.safetensors: zeroed 302
+  model-00077-of-00131.safetensors: zeroed 530
+  model-00078-of-00131.safetensors: zeroed 265
+  model-00079-of-00131.safetensors: zeroed 532
+  model-00080-of-00131.safetensors: zeroed 266
+  model-00081-of-00131.safetensors: zeroed 634
+  model-00082-of-00131.safetensors: zeroed 317
+  model-00083-of-00131.safetensors: zeroed 566
+  model-00084-of-00131.safetensors: zeroed 283
+  model-00085-of-00131.safetensors: zeroed 710
+  model-00086-of-00131.safetensors: zeroed 355
+  model-00087-of-00131.safetensors: zeroed 668
+  model-00088-of-00131.safetensors: zeroed 334
+  model-00089-of-00131.safetensors: zeroed 544
+  model-00090-of-00131.safetensors: zeroed 272
+  model-00091-of-00131.safetensors: zeroed 514
+  model-00092-of-00131.safetensors: zeroed 257
+  model-00093-of-00131.safetensors: zeroed 592
+  model-00094-of-00131.safetensors: zeroed 296
+  model-00095-of-00131.safetensors: zeroed 598
+  model-00096-of-00131.safetensors: zeroed 299
+  model-00097-of-00131.safetensors: zeroed 592
+  model-00098-of-00131.safetensors: zeroed 296
+  model-00099-of-00131.safetensors: zeroed 502
+  model-00100-of-00131.safetensors: zeroed 251
+  model-00101-of-00131.safetensors: zeroed 710
+  model-00102-of-00131.safetensors: zeroed 355
+  model-00103-of-00131.safetensors: zeroed 602
+  model-00104-of-00131.safetensors: zeroed 301
+  model-00105-of-00131.safetensors: zeroed 680
+  model-00106-of-00131.safetensors: zeroed 340
+  model-00107-of-00131.safetensors: zeroed 648
+  model-00108-of-00131.safetensors: zeroed 324
+  model-00109-of-00131.safetensors: zeroed 606
+  model-00110-of-00131.safetensors: zeroed 303
+  model-00111-of-00131.safetensors: zeroed 684
+  model-00112-of-00131.safetensors: zeroed 342
+  model-00113-of-00131.safetensors: zeroed 674
+  model-00114-of-00131.safetensors: zeroed 337
+  model-00115-of-00131.safetensors: zeroed 664
+  model-00116-of-00131.safetensors: zeroed 332
+  model-00117-of-00131.safetensors: zeroed 640
+  model-00118-of-00131.safetensors: zeroed 320
+  model-00119-of-00131.safetensors: zeroed 624
+  model-00120-of-00131.safetensors: zeroed 312
+  model-00121-of-00131.safetensors: zeroed 562
+  model-00122-of-00131.safetensors: zeroed 281
+  model-00123-of-00131.safetensors: zeroed 536
+  model-00124-of-00131.safetensors: zeroed 268
+  model-00125-of-00131.safetensors: zeroed 506
+  model-00126-of-00131.safetensors: zeroed 253
+  model-00127-of-00131.safetensors: zeroed 568
+  model-00128-of-00131.safetensors: zeroed 284
+  model-00129-of-00131.safetensors: zeroed 626
+  model-00130-of-00131.safetensors: zeroed 313
+  model-00131-of-00131.safetensors: zeroed 0
+DONE: zeroed 42066/14022 expert tensors -> /home/enigma/models/q38_tier_cold
+WARNING: -28044 candidates not found in shards
+Traceback (most recent call last):
+  File "/home/enigma/bench/prune-spike/run_experiment.py", line 314, in <module>
+    main()
+  File "/home/enigma/bench/prune-spike/run_experiment.py", line 310, in main
+    if "eval" in steps: step_eval(p, work)
+                        ^^^^^^^^^^^^^^^^^^
+  File "/home/enigma/bench/prune-spike/run_experiment.py", line 228, in step_eval
+    subprocess.run(cmd, check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/usr/bin/python3', '/home/enigma/bench/prune-spike/ablate_container.py', '--model', '/home/enigma/models/Qwen3.8-Flash-Next-FP8', '--out', '/home/enigma/models/q38_tier_cold', '--tensor-res', '["model\\\\.language_model\\\\.layers\\\\.(\\\\d+)\\\\.mlp\\\\.experts\\\\.(\\\\d+)\\\\.(gate_proj|up_proj|down_proj)\\\\.weight$"]', '--candidates', '/home/enigma/bench/prune-spike/runs/qwen38_flash_next/candidates_cold.txt', '--link-mode']' returned non-zero exit status 1.

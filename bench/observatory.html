@@ -1,0 +1,20 @@
+<!doctype html><meta charset=utf-8><meta http-equiv='refresh' content='60'><title>observatory</title><body style='background:#111;color:#0f0;font:13px/1.5 monospace;padding:16px'><pre>OBSERVATORY 2026-09-20 12:05:18 +03   (read-only pull; refresh: re-run or --watch N)
+==========================================================================
+ENIGMA  x86 16c RTX-A4500 | q38 48x512 FP8 173G   DONE  [drv] Sun Sep 20 11
+  GATE PASS ctl-base==0.0000 (FP8 round-trip lossless)
+  arm           1         2         3      mean   vs-base
+  base     2.4701    3.1249    3.2926          
+  ctl      2.4701    3.1249    3.2926            (=base)
+  cold    +0.1801   -0.2086   +0.1836   +0.0517
+  rand    +0.5222   +0.5813   +0.5098   +0.5378
+  per-expert cold/rand damage: 10%   (OLMoE band: 63-86%)  -> CONTRADICTION
+  per-traffic-unit: cold 0.7x the avg expert   (OLMoE: 22-29x)
+  cold set carries 7.85% of traffic, rand 56.81% (n=14022)
+  !! negative per-ref deltas present -> inspect that ref before quoting means
+  disk free: 369G   |   watchdog cron q38-enigma-progress: every 30m
+AIR     M3 8c 16G        | olmoe 16x64 int8 repl.   DONE
+  per-expert cold/uniform damage: 71%  (published #1621 OLMoE value: 63-86%)
+  per-traffic-unit: cold is 24.0x more load-bearing than the average expert 
+  deltas == published to 4dp (cross-host determinism: PASS)
+LOCAL   PR#1625 open | issue#1621 live | draft PENDING cells: 12
+==========================================================================</pre><p style='color:#666'>static snapshot 2026-09-20 12:05:18 +03 — run `python3 bench/observatory.py --html` to refresh</p></body>

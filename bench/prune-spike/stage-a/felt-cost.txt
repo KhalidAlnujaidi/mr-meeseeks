@@ -1,0 +1,13 @@
+ cap    hit%   misses   seconds   tok/s   us/miss     nll
+   8   27.30    19444     18.70   10.78     961.7  3.8370
+  16   56.70    11589     16.40   12.33    1415.1  3.8370
+  24   71.40     7657     14.80   13.67    1932.9  3.8370
+  32   80.20     5301     14.70   13.72    2773.1  3.8370
+  48   92.00     2134     14.00   14.38    6560.4  3.8370
+  64   96.30      980     16.00   12.65   16326.5  3.8370
+
+linear fit: seconds = 14.17 + 203.5us * misses   (RMS residual 0.87s over a 4.70s range)
+WARNING: residuals are large relative to the range — miss count alone
+         does not explain runtime here, so a felt-wait ranking cannot
+         be read as a tok/s ranking.
+PPL across caps: [3.837] (token-exact: placement only)

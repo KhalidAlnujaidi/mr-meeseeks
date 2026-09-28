@@ -1,0 +1,25 @@
+{
+  "name": "olmoe_merged",
+  "engine": "olmoe",
+  "binary": "../../colibri/c/olmoe",
+  "args": ["64", "8"],
+  "model": "~/models/olmoe_merged",
+  "layers": 16,
+  "experts": 64,
+  "norm_topk_prob": false,
+  "heat": "chat_loop",
+  "eval": "ppl_tf_nll",
+  "threads": 12,
+  "tensor_res": [
+    "model\\.layers\\.(\\d+)\\.mlp\\.experts\\.(\\d+)\\.merged_weight$"
+  ],
+  "arms": {
+    "base": "~/models/olmoe_merged",
+    "cold": "/tmp/olmoe_tier220",
+    "rand": "/tmp/olmoe_uniform",
+    "ctl":  "/tmp/olmoe_control",
+    "t51":  "/tmp/olmoe_tier51",
+    "t102": "/tmp/olmoe_tier102"
+  },
+  "notes": "allenai/OLMoE-1B-7B-0125-Instruct int8 container (convert_olmoe_merged.py). The published arm of #1621: 220-expert cold tail vs 220 uniform (seed 1972). norm_topk_prob=false -> mode1==mode2 (drop-slot == zero-contribution)."
+}

@@ -1,0 +1,34 @@
+{
+  "name": "qwen38_flash_next",
+  "engine": "qwen38",
+  "binary": "~/colibri/c/qwen38",
+  "args": [
+    "16",
+    "8"
+  ],
+  "model": "~/models/Qwen3.8-Flash-Next-FP8",
+  "layers": 48,
+  "experts": 512,
+  "norm_topk_prob": null,
+  "heat": "ppl_usage",
+  "fixtures": "corpus_split",
+  "heat_lines": 12,
+  "eval_lines": 3,
+  "eval": "ppl_tf_nll",
+  "threads": 14,
+  "pct": 0.1,
+  "seed": 1972,
+  "seq_arms": true,
+  "link_mode": true,
+  "out": "qwen38_flash_next",
+  "tensor_res": [
+    "model\\.language_model\\.layers\\.(\\d+)\\.mlp\\.experts\\.(\\d+)\\.(gate_proj|up_proj|down_proj)\\.weight$"
+  ],
+  "arms": {
+    "base": "~/models/Qwen3.8-Flash-Next-FP8",
+    "cold": "~/models/q38_tier_cold",
+    "rand": "~/models/q38_tier_rand",
+    "ctl": "~/models/q38_tier_ctl"
+  },
+  "notes": "Qwen3.8-Flash-Next FP8 (125B + 51B PLE, 48 layers x 512 routed experts top-10 + 1 shared). enigma (RTX A4500, 60GB, NVMe 5.8GB/s) run of the #1621 protocol at ~4x the grid. seq_arms+link_mode because 185.5GB x 4 copies would overrun the volume. tensor_res zeroes the gate/up/down FAMILY per cell (FP8 weights; scales untouched -> fp8 0 * scale = 0.0 exactly). The shared expert is NOT zeroed by any candidate (regex is experts.<id> only); keep it that way. norm_topk_prob absent from config: treat as unknown, verify empirically by comparing mode-1-style zero-out vs a dropped-slot eval if the question ever matters. NOTE: published corpus is 18 lines (~10.6k tok); split 12 heat / 3 eval / 3 spare, holdout-by-line like #1621 (whose heat used all 18 + eval came from separate files \u2014 this split is the honest adaptation, disclose it if published)."
+}

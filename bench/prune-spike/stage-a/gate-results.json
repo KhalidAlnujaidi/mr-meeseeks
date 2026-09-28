@@ -1,0 +1,1508 @@
+{
+ "budgets": [
+  {
+   "budget_gb": 0.5,
+   "resident_bytes": 403701760,
+   "slots_per_layer": [
+    4
+   ],
+   "gate": {
+    "baseline": {
+     "allocation": "uniform",
+     "policy": "lru"
+    },
+    "minimum_category_mean_gain": 0.1,
+    "maximum_category_regression": 0.03,
+    "candidates": [
+     {
+      "allocation": "dynamic-lru",
+      "policy": "lru",
+      "aggregate_gain": 0.13199334198950954,
+      "category_mean_gain": 0.13203861394462751,
+      "worst_category_gain": 0.11755287009063456,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 179984560.00000003,
+        "candidate_felt_wait_us": 158826858.4,
+        "gain": 0.11755287009063456,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 177961772.8,
+        "candidate_felt_wait_us": 152704120.79999998,
+        "gain": 0.14192740161329764,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 177613766.4,
+        "candidate_felt_wait_us": 154603202.60000002,
+        "gain": 0.12955394317903493,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 177419372.20000002,
+        "candidate_felt_wait_us": 152736746.40000004,
+        "gain": 0.13912024089554287,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "dynamic-lfu",
+      "policy": "lfu",
+      "aggregate_gain": 0.15437546832011068,
+      "category_mean_gain": 0.15450926426252468,
+      "worst_category_gain": 0.11200906344410891,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 179984560.00000003,
+        "candidate_felt_wait_us": 159824658.0,
+        "gain": 0.11200906344410891,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 177961772.8,
+        "candidate_felt_wait_us": 143404465.4,
+        "gain": 0.19418387924712785,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 177613766.4,
+        "candidate_felt_wait_us": 157381816.20000002,
+        "gain": 0.113909808963997,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 177419372.20000002,
+        "candidate_felt_wait_us": 142301992.0,
+        "gain": 0.19793430539486495,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "dynamic-frequency",
+      "policy": "frequency",
+      "aggregate_gain": 0.16186287015163534,
+      "category_mean_gain": 0.16202083415046914,
+      "worst_category_gain": 0.11169939577039287,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 179984560.00000003,
+        "candidate_felt_wait_us": 159880393.4,
+        "gain": 0.11169939577039287,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 177961772.8,
+        "candidate_felt_wait_us": 140695181.2,
+        "gain": 0.2094078464923003,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 177613766.4,
+        "candidate_felt_wait_us": 157282580.0,
+        "gain": 0.11446852804310559,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 177419372.20000002,
+        "candidate_felt_wait_us": 139716413.20000002,
+        "gain": 0.21250756629607775,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "dynamic-half-pinned",
+      "policy": "half-pinned",
+      "aggregate_gain": 0.13336040771734345,
+      "category_mean_gain": 0.13343039153557823,
+      "worst_category_gain": 0.10653165564535877,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 179984560.00000003,
+        "candidate_felt_wait_us": 160274619.4,
+        "gain": 0.10950906344410888,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 177961772.8,
+        "candidate_felt_wait_us": 148738751.0,
+        "gain": 0.16420954534343687,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 177613766.4,
+        "candidate_felt_wait_us": 158692277.8,
+        "gain": 0.10653165564535877,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 177419372.20000002,
+        "candidate_felt_wait_us": 150190590.2,
+        "gain": 0.1534713017094084,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "dynamic-markov",
+      "policy": "markov",
+      "aggregate_gain": 0.13336040771734345,
+      "category_mean_gain": 0.13343039153557823,
+      "worst_category_gain": 0.10653165564535877,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 179984560.00000003,
+        "candidate_felt_wait_us": 160274619.4,
+        "gain": 0.10950906344410888,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 177961772.8,
+        "candidate_felt_wait_us": 148738751.0,
+        "gain": 0.16420954534343687,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 177613766.4,
+        "candidate_felt_wait_us": 158692277.8,
+        "gain": 0.10653165564535877,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 177419372.20000002,
+        "candidate_felt_wait_us": 150190590.2,
+        "gain": 0.1534713017094084,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "uniform",
+      "policy": "frequency",
+      "aggregate_gain": 0.1139183306926273,
+      "category_mean_gain": 0.11403136287625348,
+      "worst_category_gain": 0.07077363458241478,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 179984560.00000003,
+        "candidate_felt_wait_us": 166183931.20000002,
+        "gain": 0.0766767371601209,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 177961772.8,
+        "candidate_felt_wait_us": 149911913.20000002,
+        "gain": 0.15761733072598383,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 177613766.4,
+        "candidate_felt_wait_us": 165043394.60000002,
+        "gain": 0.07077363458241478,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 177419372.20000002,
+        "candidate_felt_wait_us": 150618801.20000002,
+        "gain": 0.15105774903649444,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "uniform",
+      "policy": "lfu",
+      "aggregate_gain": 0.09760315435640182,
+      "category_mean_gain": 0.09768893741007983,
+      "worst_category_gain": 0.05949210139603226,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 179984560.00000003,
+        "candidate_felt_wait_us": 167582753.8,
+        "gain": 0.0689048338368581,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 177961772.8,
+        "candidate_felt_wait_us": 153981956.8,
+        "gain": 0.13474700562209727,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 177613766.4,
+        "candidate_felt_wait_us": 167047150.20000002,
+        "gain": 0.05949210139603226,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 177419372.20000002,
+        "candidate_felt_wait_us": 154778565.20000002,
+        "gain": 0.1276118087853317,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "half-pinned",
+      "aggregate_gain": 0.06804250296960243,
+      "category_mean_gain": 0.06810576491981404,
+      "worst_category_gain": 0.03973793779084014,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 179984560.00000003,
+        "candidate_felt_wait_us": 171561717.6,
+        "gain": 0.04679758308157119,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 177961772.8,
+        "candidate_felt_wait_us": 160897224.6,
+        "gain": 0.095888841359081,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 177613766.4,
+        "candidate_felt_wait_us": 170555761.6,
+        "gain": 0.03973793779084014,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 177419372.20000002,
+        "candidate_felt_wait_us": 161451859.8,
+        "gain": 0.08999869744776384,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "markov",
+      "aggregate_gain": 0.06804250296960243,
+      "category_mean_gain": 0.06810576491981404,
+      "worst_category_gain": 0.03973793779084014,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 179984560.00000003,
+        "candidate_felt_wait_us": 171561717.6,
+        "gain": 0.04679758308157119,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 177961772.8,
+        "candidate_felt_wait_us": 160897224.6,
+        "gain": 0.095888841359081,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 177613766.4,
+        "candidate_felt_wait_us": 170555761.6,
+        "gain": 0.03973793779084014,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 177419372.20000002,
+        "candidate_felt_wait_us": 161451859.8,
+        "gain": 0.08999869744776384,
+        "traces": 6
+       }
+      },
+      "pass": false
+     }
+    ]
+   },
+   "policies": {
+    "lru": {
+     "felt_wait_s": 712.9794714,
+     "misses": 524481,
+     "hits": 104803,
+     "hit_rate": 0.1665432459747904,
+     "bytes_read": 3308342231040
+    },
+    "half-pinned": {
+     "felt_wait_s": 664.4665635999999,
+     "misses": 488794,
+     "hits": 140490,
+     "hit_rate": 0.22325372963558585,
+     "bytes_read": 3083234344960
+    },
+    "lfu": {
+     "felt_wait_s": 643.390426,
+     "misses": 473290,
+     "hits": 155994,
+     "hit_rate": 0.24789125418729857,
+     "bytes_read": 2985437593600
+    },
+    "frequency": {
+     "felt_wait_s": 631.7580402000002,
+     "misses": 464733,
+     "hits": 164551,
+     "hit_rate": 0.2614892480978382,
+     "bytes_read": 2931461406720
+    },
+    "markov": {
+     "felt_wait_s": 664.4665635999999,
+     "misses": 488794,
+     "hits": 140490,
+     "hit_rate": 0.22325372963558585,
+     "bytes_read": 3083234344960
+    }
+   }
+  },
+  {
+   "budget_gb": 1.0,
+   "resident_bytes": 908328960,
+   "slots_per_layer": [
+    9
+   ],
+   "gate": {
+    "baseline": {
+     "allocation": "uniform",
+     "policy": "lru"
+    },
+    "minimum_category_mean_gain": 0.1,
+    "maximum_category_regression": 0.03,
+    "candidates": [
+     {
+      "allocation": "dynamic-lru",
+      "policy": "lru",
+      "aggregate_gain": 0.04658221426860364,
+      "category_mean_gain": 0.04680581413351958,
+      "worst_category_gain": 0.03631862655792853,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 126849692.2,
+        "candidate_felt_wait_us": 122242685.60000002,
+        "gain": 0.03631862655792853,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 118309941.4,
+        "candidate_felt_wait_us": 112588226.80000001,
+        "gain": 0.04836207788029547,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 120671219.2,
+        "candidate_felt_wait_us": 115093600.99999999,
+        "gain": 0.04622161139149258,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 116531846.20000002,
+        "candidate_felt_wait_us": 109968663.00000001,
+        "gain": 0.05632094070436174,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "dynamic-half-pinned",
+      "policy": "half-pinned",
+      "aggregate_gain": 0.06658024152070656,
+      "category_mean_gain": 0.0674322025131754,
+      "worst_category_gain": 0.03199351117519814,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 126849692.2,
+        "candidate_felt_wait_us": 122252201.4,
+        "gain": 0.036243610215082545,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 118309941.4,
+        "candidate_felt_wait_us": 106503552.4,
+        "gain": 0.09979202812790844,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 120671219.2,
+        "candidate_felt_wait_us": 116810523.20000002,
+        "gain": 0.03199351117519814,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 116531846.20000002,
+        "candidate_felt_wait_us": 104680597.0,
+        "gain": 0.10169966053451246,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "dynamic-markov",
+      "policy": "markov",
+      "aggregate_gain": 0.06658024152070656,
+      "category_mean_gain": 0.0674322025131754,
+      "worst_category_gain": 0.03199351117519814,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 126849692.2,
+        "candidate_felt_wait_us": 122252201.4,
+        "gain": 0.036243610215082545,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 118309941.4,
+        "candidate_felt_wait_us": 106503552.4,
+        "gain": 0.09979202812790844,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 120671219.2,
+        "candidate_felt_wait_us": 116810523.20000002,
+        "gain": 0.03199351117519814,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 116531846.20000002,
+        "candidate_felt_wait_us": 104680597.0,
+        "gain": 0.10169966053451246,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "half-pinned",
+      "aggregate_gain": 0.009226823734975336,
+      "category_mean_gain": 0.00989529175768151,
+      "worst_category_gain": -0.02646223864455667,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 126849692.2,
+        "candidate_felt_wait_us": 128425236.80000003,
+        "gain": -0.01242056305123635,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 118309941.4,
+        "candidate_felt_wait_us": 113259770.4,
+        "gain": 0.04268593949282439,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 120671219.2,
+        "candidate_felt_wait_us": 123864449.80000001,
+        "gain": -0.02646223864455667,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 116531846.20000002,
+        "candidate_felt_wait_us": 112362566.4,
+        "gain": 0.03577802923369467,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "markov",
+      "aggregate_gain": 0.009226823734975336,
+      "category_mean_gain": 0.00989529175768151,
+      "worst_category_gain": -0.02646223864455667,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 126849692.2,
+        "candidate_felt_wait_us": 128425236.80000003,
+        "gain": -0.01242056305123635,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 118309941.4,
+        "candidate_felt_wait_us": 113259770.4,
+        "gain": 0.04268593949282439,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 120671219.2,
+        "candidate_felt_wait_us": 123864449.80000001,
+        "gain": -0.02646223864455667,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 116531846.20000002,
+        "candidate_felt_wait_us": 112362566.4,
+        "gain": 0.03577802923369467,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "dynamic-lfu",
+      "policy": "lfu",
+      "aggregate_gain": 0.020778671777022976,
+      "category_mean_gain": 0.022338390061704586,
+      "worst_category_gain": -0.03680380317231432,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 126849692.2,
+        "candidate_felt_wait_us": 131502918.40000002,
+        "gain": -0.036682991651752844,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 118309941.4,
+        "candidate_felt_wait_us": 108917846.8,
+        "gain": 0.07938550631384227,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 120671219.2,
+        "candidate_felt_wait_us": 125112379.0,
+        "gain": -0.03680380317231432,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 116531846.20000002,
+        "candidate_felt_wait_us": 106806698.6,
+        "gain": 0.08345484875704323,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "dynamic-frequency",
+      "policy": "frequency",
+      "aggregate_gain": 0.007989628982484816,
+      "category_mean_gain": 0.009572308248786408,
+      "worst_category_gain": -0.05472692862292708,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 126849692.2,
+        "candidate_felt_wait_us": 133189933.80000001,
+        "gain": -0.0499823175763292,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 118309941.4,
+        "candidate_felt_wait_us": 109378683.4,
+        "gain": 0.07549034252163021,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 120671219.2,
+        "candidate_felt_wait_us": 127275184.39999999,
+        "gain": -0.05472692862292708,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 116531846.20000002,
+        "candidate_felt_wait_us": 108664998.4,
+        "gain": 0.0675081366727717,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "lfu",
+      "aggregate_gain": -0.02359688305832286,
+      "category_mean_gain": -0.02213661726164662,
+      "worst_category_gain": -0.08112157534246581,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 126849692.2,
+        "candidate_felt_wait_us": 136540854.8,
+        "gain": -0.07639878687857005,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 118309941.4,
+        "candidate_felt_wait_us": 114298352.0,
+        "gain": 0.033907458261998646,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 120671219.2,
+        "candidate_felt_wait_us": 130460258.60000001,
+        "gain": -0.08112157534246581,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 116531846.20000002,
+        "candidate_felt_wait_us": 112445489.8,
+        "gain": 0.03506643491245074,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "frequency",
+      "aggregate_gain": -0.03133569123677195,
+      "category_mean_gain": -0.029823412107197585,
+      "worst_category_gain": -0.09187995674116804,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 126849692.2,
+        "candidate_felt_wait_us": 137829566.0,
+        "gain": -0.08655814302401592,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 118309941.4,
+        "candidate_felt_wait_us": 114333696.4,
+        "gain": 0.03360871413634222,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 120671219.2,
+        "candidate_felt_wait_us": 131758485.60000001,
+        "gain": -0.09187995674116804,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 116531846.20000002,
+        "candidate_felt_wait_us": 113556119.60000001,
+        "gain": 0.025535737200051402,
+        "traces": 6
+       }
+      },
+      "pass": false
+     }
+    ]
+   },
+   "policies": {
+    "lru": {
+     "felt_wait_s": 482.362699,
+     "misses": 354835,
+     "hits": 274449,
+     "hit_rate": 0.43612899740021993,
+     "bytes_read": 2238242406400
+    },
+    "half-pinned": {
+     "felt_wait_s": 477.9120234,
+     "misses": 351561,
+     "hits": 277723,
+     "hit_rate": 0.44133173575047197,
+     "bytes_read": 2217590538240
+    },
+    "lfu": {
+     "felt_wait_s": 493.7449552,
+     "misses": 363208,
+     "hits": 266076,
+     "hit_rate": 0.42282339929189366,
+     "bytes_read": 2291057950720
+    },
+    "frequency": {
+     "felt_wait_s": 497.47786759999997,
+     "misses": 365954,
+     "hits": 263330,
+     "hit_rate": 0.41845970976538416,
+     "bytes_read": 2308379279360
+    },
+    "markov": {
+     "felt_wait_s": 477.9120234,
+     "misses": 351561,
+     "hits": 277723,
+     "hit_rate": 0.44133173575047197,
+     "bytes_read": 2217590538240
+    }
+   }
+  },
+  {
+   "budget_gb": 2.0,
+   "resident_bytes": 1917583360,
+   "slots_per_layer": [
+    19
+   ],
+   "gate": {
+    "baseline": {
+     "allocation": "uniform",
+     "policy": "lru"
+    },
+    "minimum_category_mean_gain": 0.1,
+    "maximum_category_regression": 0.03,
+    "candidates": [
+     {
+      "allocation": "dynamic-half-pinned",
+      "policy": "half-pinned",
+      "aggregate_gain": 0.10297228758767223,
+      "category_mean_gain": 0.10414116323576997,
+      "worst_category_gain": 0.07943950514868983,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 85730561.0,
+        "candidate_felt_wait_us": 78245704.60000001,
+        "gain": 0.08730674700705611,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 72015574.4,
+        "candidate_felt_wait_us": 61843184.2,
+        "gain": 0.1412526427061311,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 75380089.4,
+        "candidate_felt_wait_us": 69391932.4,
+        "gain": 0.07943950514868983,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 64385262.20000001,
+        "candidate_felt_wait_us": 57395227.4,
+        "gain": 0.10856575808120279,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "dynamic-markov",
+      "policy": "markov",
+      "aggregate_gain": 0.10297228758767223,
+      "category_mean_gain": 0.10414116323576997,
+      "worst_category_gain": 0.07943950514868983,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 85730561.0,
+        "candidate_felt_wait_us": 78245704.60000001,
+        "gain": 0.08730674700705611,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 72015574.4,
+        "candidate_felt_wait_us": 61843184.2,
+        "gain": 0.1412526427061311,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 75380089.4,
+        "candidate_felt_wait_us": 69391932.4,
+        "gain": 0.07943950514868983,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 64385262.20000001,
+        "candidate_felt_wait_us": 57395227.4,
+        "gain": 0.10856575808120279,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "dynamic-lru",
+      "policy": "lru",
+      "aggregate_gain": 0.04033720956797876,
+      "category_mean_gain": 0.04073419381589921,
+      "worst_category_gain": 0.03437722984222614,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 85730561.0,
+        "candidate_felt_wait_us": 82783381.80000001,
+        "gain": 0.03437722984222614,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 72015574.4,
+        "candidate_felt_wait_us": 68830500.19999999,
+        "gain": 0.04422757475083081,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 75380089.4,
+        "candidate_felt_wait_us": 72371737.2,
+        "gain": 0.03990910894303082,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 64385262.20000001,
+        "candidate_felt_wait_us": 61525084.599999994,
+        "gain": 0.04442286172750906,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "half-pinned",
+      "aggregate_gain": 0.056073656073656115,
+      "category_mean_gain": 0.05683843015743325,
+      "worst_category_gain": 0.031595462660727644,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 85730561.0,
+        "candidate_felt_wait_us": 81827723.6,
+        "gain": 0.04552445889161983,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 72015574.4,
+        "candidate_felt_wait_us": 65170995.400000006,
+        "gain": 0.09504303835699184,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 75380089.4,
+        "candidate_felt_wait_us": 72998420.6,
+        "gain": 0.031595462660727644,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 64385262.20000001,
+        "candidate_felt_wait_us": 60831790.6,
+        "gain": 0.05519076072039369,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "markov",
+      "aggregate_gain": 0.056073656073656115,
+      "category_mean_gain": 0.05683843015743325,
+      "worst_category_gain": 0.031595462660727644,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 85730561.0,
+        "candidate_felt_wait_us": 81827723.6,
+        "gain": 0.04552445889161983,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 72015574.4,
+        "candidate_felt_wait_us": 65170995.400000006,
+        "gain": 0.09504303835699184,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 75380089.4,
+        "candidate_felt_wait_us": 72998420.6,
+        "gain": 0.031595462660727644,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 64385262.20000001,
+        "candidate_felt_wait_us": 60831790.6,
+        "gain": 0.05519076072039369,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "dynamic-lfu",
+      "policy": "lfu",
+      "aggregate_gain": 0.01140938064014991,
+      "category_mean_gain": 0.014683234102023913,
+      "worst_category_gain": -0.04968350435519647,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 85730561.0,
+        "candidate_felt_wait_us": 88469752.00000001,
+        "gain": -0.031951161500039814,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 72015574.4,
+        "candidate_felt_wait_us": 64076678.40000001,
+        "gain": 0.11023859861069152,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 75380089.4,
+        "candidate_felt_wait_us": 79125236.4,
+        "gain": -0.04968350435519647,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 64385262.20000001,
+        "candidate_felt_wait_us": 62445398.4,
+        "gain": 0.030129003652640426,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "lfu",
+      "aggregate_gain": -0.03369811062118754,
+      "category_mean_gain": -0.03088996737159965,
+      "worst_category_gain": -0.09736524138428533,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 85730561.0,
+        "candidate_felt_wait_us": 91710561.60000002,
+        "gain": -0.0697534290018238,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 72015574.4,
+        "candidate_felt_wait_us": 67397692.60000001,
+        "gain": 0.06412337662337658,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 75380089.4,
+        "candidate_felt_wait_us": 82719490.00000001,
+        "gain": -0.09736524138428533,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 64385262.20000001,
+        "candidate_felt_wait_us": 65709317.800000004,
+        "gain": -0.020564575723666056,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "dynamic-frequency",
+      "policy": "frequency",
+      "aggregate_gain": -0.03322291014598699,
+      "category_mean_gain": -0.030549734148945372,
+      "worst_category_gain": -0.10007033236551181,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 85730561.0,
+        "candidate_felt_wait_us": 91653466.80000001,
+        "gain": -0.06908744945690967,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 72015574.4,
+        "candidate_felt_wait_us": 66743821.2,
+        "gain": 0.07320295983086685,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 75380089.4,
+        "candidate_felt_wait_us": 82923400.0,
+        "gain": -0.10007033236551181,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 64385262.20000001,
+        "candidate_felt_wait_us": 66074996.400000006,
+        "gain": -0.026244114604226855,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "frequency",
+      "aggregate_gain": -0.07492175184482881,
+      "category_mean_gain": -0.07255683838855782,
+      "worst_category_gain": -0.14537158933112124,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 85730561.0,
+        "candidate_felt_wait_us": 94701241.6,
+        "gain": -0.10463807183065085,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 72015574.4,
+        "candidate_felt_wait_us": 69862284.8,
+        "gain": 0.029900332225913744,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 75380089.4,
+        "candidate_felt_wait_us": 86338212.80000001,
+        "gain": -0.14537158933112124,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 64385262.20000001,
+        "candidate_felt_wait_us": 68899829.60000001,
+        "gain": -0.07011802461837295,
+        "traces": 6
+       }
+      },
+      "pass": false
+     }
+    ]
+   },
+   "policies": {
+    "lru": {
+     "felt_wait_s": 297.511487,
+     "misses": 218855,
+     "hits": 410429,
+     "hit_rate": 0.6522158516663382,
+     "bytes_read": 1380502323200
+    },
+    "half-pinned": {
+     "felt_wait_s": 280.8289302,
+     "misses": 206583,
+     "hits": 422701,
+     "hit_rate": 0.6717173803878694,
+     "bytes_read": 1303092510720
+    },
+    "lfu": {
+     "felt_wait_s": 307.537062,
+     "misses": 226230,
+     "hits": 403054,
+     "hit_rate": 0.640496182963495,
+     "bytes_read": 1427022643200
+    },
+    "frequency": {
+     "felt_wait_s": 319.8015688,
+     "misses": 235252,
+     "hits": 394032,
+     "hit_rate": 0.6261592540093185,
+     "bytes_read": 1483931975680
+    },
+    "markov": {
+     "felt_wait_s": 280.8289302,
+     "misses": 206583,
+     "hits": 422701,
+     "hit_rate": 0.6717173803878694,
+     "bytes_read": 1303092510720
+    }
+   }
+  },
+  {
+   "budget_gb": 4.0,
+   "resident_bytes": 3936092160,
+   "slots_per_layer": [
+    39
+   ],
+   "gate": {
+    "baseline": {
+     "allocation": "uniform",
+     "policy": "lru"
+    },
+    "minimum_category_mean_gain": 0.1,
+    "maximum_category_regression": 0.03,
+    "candidates": [
+     {
+      "allocation": "dynamic-half-pinned",
+      "policy": "half-pinned",
+      "aggregate_gain": 0.18263663921522696,
+      "category_mean_gain": 0.18751481215807814,
+      "worst_category_gain": 0.1568928006329116,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 33377348.200000007,
+        "candidate_felt_wait_us": 28130064.200000007,
+        "gain": 0.15721093145440473,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 24307431.400000002,
+        "candidate_felt_wait_us": 18936442.0,
+        "gain": 0.22096079637604168,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 27492505.600000005,
+        "candidate_felt_wait_us": 23179129.4,
+        "gain": 0.1568928006329116,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 19310277.0,
+        "candidate_felt_wait_us": 15158669.4,
+        "gain": 0.21499472016895457,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "dynamic-markov",
+      "policy": "markov",
+      "aggregate_gain": 0.18263663921522696,
+      "category_mean_gain": 0.18751481215807814,
+      "worst_category_gain": 0.1568928006329116,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 33377348.200000007,
+        "candidate_felt_wait_us": 28130064.200000007,
+        "gain": 0.15721093145440473,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 24307431.400000002,
+        "candidate_felt_wait_us": 18936442.0,
+        "gain": 0.22096079637604168,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 27492505.600000005,
+        "candidate_felt_wait_us": 23179129.4,
+        "gain": 0.1568928006329116,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 19310277.0,
+        "candidate_felt_wait_us": 15158669.4,
+        "gain": 0.21499472016895457,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "uniform",
+      "policy": "half-pinned",
+      "aggregate_gain": 0.10935040266448082,
+      "category_mean_gain": 0.11347668292259117,
+      "worst_category_gain": 0.08351463607594954,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 33377348.200000007,
+        "candidate_felt_wait_us": 30378511.799999997,
+        "gain": 0.08984645460839844,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 24307431.400000002,
+        "candidate_felt_wait_us": 20836883.2,
+        "gain": 0.1427772495945418,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 27492505.600000005,
+        "candidate_felt_wait_us": 25196479.0,
+        "gain": 0.08351463607594954,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 19310277.0,
+        "candidate_felt_wait_us": 16649931.2,
+        "gain": 0.13776839141147487,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "uniform",
+      "policy": "markov",
+      "aggregate_gain": 0.10935040266448082,
+      "category_mean_gain": 0.11347668292259117,
+      "worst_category_gain": 0.08351463607594954,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 33377348.200000007,
+        "candidate_felt_wait_us": 30378511.799999997,
+        "gain": 0.08984645460839844,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 24307431.400000002,
+        "candidate_felt_wait_us": 20836883.2,
+        "gain": 0.1427772495945418,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 27492505.600000005,
+        "candidate_felt_wait_us": 25196479.0,
+        "gain": 0.08351463607594954,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 19310277.0,
+        "candidate_felt_wait_us": 16649931.2,
+        "gain": 0.13776839141147487,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "dynamic-lfu",
+      "policy": "lfu",
+      "aggregate_gain": 0.1035869013699702,
+      "category_mean_gain": 0.10896733803822142,
+      "worst_category_gain": 0.037331882911392535,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 33377348.200000007,
+        "candidate_felt_wait_us": 31475547.6,
+        "gain": 0.05697878059707586,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 24307431.400000002,
+        "candidate_felt_wait_us": 17984862.0,
+        "gain": 0.26010849505061245,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 27492505.600000005,
+        "candidate_felt_wait_us": 26466158.6,
+        "gain": 0.037331882911392535,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 19310277.0,
+        "candidate_felt_wait_us": 17737451.200000003,
+        "gain": 0.08145019359380484,
+        "traces": 6
+       }
+      },
+      "pass": true
+     },
+     {
+      "allocation": "dynamic-lru",
+      "policy": "lru",
+      "aggregate_gain": 0.07323419590700331,
+      "category_mean_gain": 0.07480639529681284,
+      "worst_category_gain": 0.06178471062599276,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 33377348.200000007,
+        "candidate_felt_wait_us": 31315138.400000006,
+        "gain": 0.06178471062599276,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 24307431.400000002,
+        "candidate_felt_wait_us": 22243862.199999996,
+        "gain": 0.08489458083999803,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 27492505.600000005,
+        "candidate_felt_wait_us": 25541766.6,
+        "gain": 0.07095530063291151,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 19310277.0,
+        "candidate_felt_wait_us": 17734732.400000002,
+        "gain": 0.08159098908834905,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "lfu",
+      "aggregate_gain": 0.036350389654319824,
+      "category_mean_gain": 0.0401289842152464,
+      "worst_category_gain": -0.0330795094936708,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 33377348.200000007,
+        "candidate_felt_wait_us": 33374629.400000002,
+        "gain": 8.145644116821928e-05,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 24307431.400000002,
+        "candidate_felt_wait_us": 19598469.8,
+        "gain": 0.19372518315530457,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 27492505.600000005,
+        "candidate_felt_wait_us": 28401944.200000003,
+        "gain": -0.0330795094936708,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 19310277.0,
+        "candidate_felt_wait_us": 19314355.200000003,
+        "gain": -0.0002111932418164162,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "dynamic-frequency",
+      "policy": "frequency",
+      "aggregate_gain": -0.01435020751206681,
+      "category_mean_gain": -0.011328578524668774,
+      "worst_category_gain": -0.09152492088607588,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 33377348.200000007,
+        "candidate_felt_wait_us": 35183990.8,
+        "gain": -0.05412780515619243,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 24307431.400000002,
+        "candidate_felt_wait_us": 19998133.400000002,
+        "gain": 0.17728314971198478,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 27492505.600000005,
+        "candidate_felt_wait_us": 30008755.000000004,
+        "gain": -0.09152492088607588,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 19310277.0,
+        "candidate_felt_wait_us": 20796101.200000003,
+        "gain": -0.07694473776839157,
+        "traces": 6
+       }
+      },
+      "pass": false
+     },
+     {
+      "allocation": "uniform",
+      "policy": "frequency",
+      "aggregate_gain": -0.08093621118093222,
+      "category_mean_gain": -0.08030964709128532,
+      "worst_category_gain": -0.16099964801126368,
+      "categories": {
+       "Desktop-projects-lg-": {
+        "baseline_felt_wait_us": 33377348.200000007,
+        "candidate_felt_wait_us": 36851974.599999994,
+        "gain": -0.1041013318128127,
+        "traces": 6
+       },
+       "Desktop-think-fast": {
+        "baseline_felt_wait_us": 24307431.400000002,
+        "candidate_felt_wait_us": 21789822.6,
+        "gain": 0.10357362563615012,
+        "traces": 6
+       },
+       "dev-LeastGen": {
+        "baseline_felt_wait_us": 27492505.600000005,
+        "candidate_felt_wait_us": 31883367.6,
+        "gain": -0.15971123417721503,
+        "traces": 6
+       },
+       "dev-leastgen-demo": {
+        "baseline_felt_wait_us": 19310277.0,
+        "candidate_felt_wait_us": 22419224.8,
+        "gain": -0.16099964801126368,
+        "traces": 6
+       }
+      },
+      "pass": false
+     }
+    ]
+   },
+   "policies": {
+    "lru": {
+     "felt_wait_s": 104.4875622,
+     "misses": 76863,
+     "hits": 552421,
+     "hit_rate": 0.8778564209482523,
+     "bytes_read": 484839505920
+    },
+    "half-pinned": {
+     "felt_wait_s": 93.06180520000002,
+     "misses": 68458,
+     "hits": 560826,
+     "hit_rate": 0.8912128705004417,
+     "bytes_read": 431822110720
+    },
+    "lfu": {
+     "felt_wait_s": 100.68939860000002,
+     "misses": 74069,
+     "hits": 555215,
+     "hit_rate": 0.8822963876405566,
+     "bytes_read": 467215400960
+    },
+    "frequency": {
+     "felt_wait_s": 112.9443896,
+     "misses": 83084,
+     "hits": 546200,
+     "hit_rate": 0.8679705824397251,
+     "bytes_read": 524080578560
+    },
+    "markov": {
+     "felt_wait_s": 93.06180520000002,
+     "misses": 68458,
+     "hits": 560826,
+     "hit_rate": 0.8912128705004417,
+     "bytes_read": 431822110720
+    }
+   }
+  }
+ ],
+ "read_gbps": 4.64,
+ "felt_fraction": 1.0,
+ "train_traces": [
+  "dev-leastgen-demo_06.trace",
+  "dev-leastgen-demo_07.trace",
+  "Desktop-projects-lg-_06.trace",
+  "Desktop-projects-lg-_07.trace",
+  "dev-LeastGen_06.trace",
+  "dev-LeastGen_07.trace",
+  "Desktop-think-fast_06.trace",
+  "Desktop-think-fast_07.trace"
+ ],
+ "held_traces": [
+  "dev-leastgen-demo_00.trace",
+  "dev-leastgen-demo_01.trace",
+  "dev-leastgen-demo_02.trace",
+  "dev-leastgen-demo_03.trace",
+  "dev-leastgen-demo_04.trace",
+  "dev-leastgen-demo_05.trace",
+  "Desktop-projects-lg-_00.trace",
+  "Desktop-projects-lg-_01.trace",
+  "Desktop-projects-lg-_02.trace",
+  "Desktop-projects-lg-_03.trace",
+  "Desktop-projects-lg-_04.trace",
+  "Desktop-projects-lg-_05.trace",
+  "dev-LeastGen_00.trace",
+  "dev-LeastGen_01.trace",
+  "dev-LeastGen_02.trace",
+  "dev-LeastGen_03.trace",
+  "dev-LeastGen_04.trace",
+  "dev-LeastGen_05.trace",
+  "Desktop-think-fast_00.trace",
+  "Desktop-think-fast_01.trace",
+  "Desktop-think-fast_02.trace",
+  "Desktop-think-fast_03.trace",
+  "Desktop-think-fast_04.trace",
+  "Desktop-think-fast_05.trace"
+ ],
+ "categories": [
+  "dev-leastgen-demo",
+  "dev-leastgen-demo",
+  "dev-leastgen-demo",
+  "dev-leastgen-demo",
+  "dev-leastgen-demo",
+  "dev-leastgen-demo",
+  "Desktop-projects-lg-",
+  "Desktop-projects-lg-",
+  "Desktop-projects-lg-",
+  "Desktop-projects-lg-",
+  "Desktop-projects-lg-",
+  "Desktop-projects-lg-",
+  "dev-LeastGen",
+  "dev-LeastGen",
+  "dev-LeastGen",
+  "dev-LeastGen",
+  "dev-LeastGen",
+  "dev-LeastGen",
+  "Desktop-think-fast",
+  "Desktop-think-fast",
+  "Desktop-think-fast",
+  "Desktop-think-fast",
+  "Desktop-think-fast",
+  "Desktop-think-fast"
+ ]
+}
