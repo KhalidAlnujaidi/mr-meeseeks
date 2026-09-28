@@ -26,6 +26,51 @@ export ISO_SAMPLE="${ISO_SAMPLE:-0}"
 
 mkdir -p "$OUT"
 
+# F123: the zero-network law (F93) is an ENFORCED gate, not a convention.
+# Previously each arm carried its own `env -u ...` prefix and only the golem
+# branch had one — smolagents and langgraph ran with the operator's provider
+# keys still exported, and nothing anywhere refused. A law enforced by
+# repetition at one call site is enforced nowhere in particular: a new arm
+# would silently inherit the omission the same way.
+#
+# The gate fires BEFORE the engine is touched, names the offending variables,
+# and exits 3. The scrub itself is applied by run_scrubbed() below, so every
+# arm goes through ONE path and a new arm cannot forget it.
+NETWORK_KEYS=(OPENROUTER_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY TYPESAFE_API_KEY)
+present_keys=()
+for k in "${NETWORK_KEYS[@]}"; do
+  [ -n "${!k:-}" ] && present_keys+=("$k")
+done
+if [ "${#present_keys[@]}" -gt 0 ]; then
+  echo "REFUSING TO RUN: zero-network law (F93/F123) violated." >&2
+  echo "  provider key(s) present in this environment: ${present_keys[*]}" >&2
+  echo "  The harness must not be able to reach an outside model." >&2
+  echo "  Re-run with them unset, e.g.:" >&2
+  printf '    env' >&2
+  for k in "${NETWORK_KEYS[@]}"; do printf ' -u %s' "$k" >&2; done
+  printf ' %s %s\n' "$0" "$*" >&2
+  exit 3
+fi
+echo "[preflight] zero-network law OK (no provider keys in environment)"
+
+# F123: the single scrub path. `run_scrubbed <cmd> [args...]` runs a command
+# with every provider key removed from its environment, so an arm cannot be
+# launched with keys even if a future caller forgets. Belt and braces with the
+# preflight refusal above: the refusal catches a bad environment, this catches
+# a bad call site.
+#
+# NOTE on the array build: `${NETWORK_KEYS[@]/#/-u }` does NOT work here — it
+# yields ONE argument per element, "-u OPENROUTER_API_KEY" (a single word with
+# an embedded space), which env rejects as a malformed name and which therefore
+# strips nothing. Measured: the child still saw the key. Build explicit
+# "-u" "KEY" pairs instead, and assert the strip in the regression test.
+run_scrubbed() {
+  local scrub_args=()
+  local k
+  for k in "${NETWORK_KEYS[@]}"; do scrub_args+=(-u "$k"); done
+  env "${scrub_args[@]}" "$@"
+}
+
 code=$(curl -s -m 3 "http://127.0.0.1:$ENGINE_PORT/v1/models" -o /dev/null -w "%{http_code}" || echo 000)
 [ "$code" = "200" ] || { echo "engine not ready on :$ENGINE_PORT (got $code)"; exit 4; }
 if [ ! -x "$HERE/golem-runner" ]; then "$HERE/build_golem.sh" >&2; fi
@@ -104,17 +149,17 @@ run_arm() {
     local rc=0
     case "$name" in
       golem)
-        ISO_WARMUP=$first env -u OPENROUTER_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+        ISO_WARMUP=$first run_scrubbed \
           "$HERE/golem-runner" "http://127.0.0.1:$pport/v1/chat/completions" "$MODEL_ID" \
           "$sandbox" "$HERE/tasks.json" "$rout" "$tid" \
           > "$OUT/golem-$tid-stdout.log" 2>&1 || rc=$? ;;
       smolagents)
-        ISO_WARMUP=$first "$VENV_PY" "$HERE/smolagents_runner.py" \
+        ISO_WARMUP=$first run_scrubbed "$VENV_PY" "$HERE/smolagents_runner.py" \
           "http://127.0.0.1:$pport/v1" "$MODEL_ID" \
           "$sandbox" "$HERE/tasks.json" "$rout" "$tid" \
           > "$OUT/smolagents-$tid-stdout.log" 2>&1 || rc=$? ;;
       langgraph)
-        ISO_WARMUP=$first "$LG_PY" "$HERE/langgraph_runner.py" \
+        ISO_WARMUP=$first run_scrubbed "$LG_PY" "$HERE/langgraph_runner.py" \
           "http://127.0.0.1:$pport/v1" "$MODEL_ID" \
           "$sandbox" "$HERE/tasks.json" "$rout" "$tid" \
           > "$OUT/langgraph-$tid-stdout.log" 2>&1 || rc=$? ;;

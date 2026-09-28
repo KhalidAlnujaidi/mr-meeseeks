@@ -700,6 +700,60 @@ one sample per cell, presented as a capability.
   a self-reading test suite will happily certify the corrupted result. The
   output path is part of the interface.
 
+## F123 — the zero-network law was a convention, not an enforced invariant
+
+- **F123** — **Two of three arms ran WITHOUT the API-key scrub, and nothing
+  enforced the law anywhere.** F93 states that the harness must run with the
+  provider keys scrubbed, so that no arm can reach an outside model. That law
+  was implemented as a per-invocation `env -u ...` prefix, and only ONE of the
+  three arms got it:
+
+  | arm | scrub in `run_iso_bench.sh` |
+  |---|---|
+  | golem | yes (line 107) |
+  | smolagents | **no** (line 112) |
+  | langgraph | **no** (line 117) |
+
+  `proxy.py` did not enforce it either — it has no key inspection and no
+  environment check, and it cannot: the proxy sits *downstream* of the runner,
+  so a runner that could reach the internet would simply never call it. The
+  measured results were produced with a scrubbed environment by operator
+  convention, so the published numbers are not known to be contaminated — but
+  **the harness would not have stopped an unscrubbed run.** An invariant that
+  depends on the operator remembering is not yet an invariant, and the
+  copy-per-branch shape meant a fourth arm would have inherited the omission.
+
+  **Fix:** (a) a shared `run_scrubbed()` helper owns the scrub, so every arm
+  goes through one path and a new arm cannot forget it; (b) a **preflight
+  refusal** aborts the run loudly if any of the four provider keys is present
+  in the environment, converting the convention into an enforced gate that
+  fires BEFORE the engine is touched. The refusal names the offending
+  variables and the exact command to re-run with them unset.
+
+  **Regression:** `test_zero_network_guard.py` — asserts the guard refuses with
+  a key set (exit 3, names the variable), passes with a clean environment,
+  asserts ALL arms are invoked through the scrub path, and **behaviourally**
+  asserts `run_scrubbed` removes the keys from a child process. Verified failing
+  pre-fix: against the pre-fix script a key-set environment proceeded past
+  preflight to the engine check (exit 4, `REFUSED=no`), so Z1 reads RED on old
+  code and GREEN on new (exit 3, `REFUSED=yes`).
+
+  **A second defect found WHILE fixing this one (recorded because it is the
+  same class):** the first version of the scrub helper used
+  `${NETWORK_KEYS[@]/#/-u }`, which yields ONE argument per key —
+  `"-u OPENROUTER_API_KEY"`, a single word with an embedded space. `env`
+  rejects that as a malformed name and the scrub silently strips **nothing**;
+  measured, the child still saw the exported key. It *looked* correct and the
+  structural checks passed. Replaced with explicit `-u` `KEY` pairs, and pinned
+  by a behavioural test (Z8) that runs the real helper and asserts the child
+  sees the key unset — a structural assertion would not have caught it.
+
+  **Lesson:** F93 was written as a property of the harness, but was
+  implemented as a property of one call site. When a law is enforced by
+  repetition, it is enforced nowhere in particular. And a scrub that is
+  *written* is not a scrub that *works*: assert the effect on the child
+  process, not the presence of the flag.
+
 ## Layout
 
 ```
