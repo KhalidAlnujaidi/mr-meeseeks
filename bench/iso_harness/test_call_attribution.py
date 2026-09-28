@@ -7,18 +7,21 @@ Cases R1-R6 of DESIGN-F124-call-attribution.md section 5:
   R1  synthetic tie fixture (exact req_ts_ms)  -> calls/replica [3,3,3],
       classes [solicit,parser-retry,parser-retry] x3, warmup orphaned
   R2  same fixture                             -> PROMPT-IDENTICAL (raw), exit 0
-  R3  REAL audit-T10 capture (legacy, inferred)-> PROMPT-IDENTICAL (raw),
-      exit 0, attribution-mode=window-inferred, tie_ambiguous: 0
+  R3  REAL audit-T10 capture (legacy, inferred)-> manufactured findings
+      DELETED, traces match [solicit,parser-retry,parser-retry]x3, but the one
+      shared-boundary receipt stays NAMED: TRACE-NOT-CERTIFIABLE, exit 1 via
+      tie-refusal (NOT via TRACE-VARIANT); attribution-mode=window-inferred
   R4  REAL audit-T1 capture (F121 regression)  -> TRACE-VARIANT, exit 1,
       tie_ambiguous: 0 (the genuine 2/2/3 cascade variance survives)
   R5  REAL referee over the T10 capture        -> prompt 407/407/407,
       completion 67/79/68, `calls claimed >1: {}`  (pre-F124: 427/565/565)
   R6  synthetic legacy variant (no req_ts_ms)  -> attribution-mode=window-
-      inferred, tie_ambiguous: 1 NAMED, exit 1 — refuses to certify
+      inferred, tie_ambiguous: 2 NAMED, exit 1 — refuses to certify
 
 RED evidence (this file against the pre-F124 code): R1 prints [4,2,4] with the
 warmup inside replica 0 and a stolen call leading replica 2; R2 exits 1
-TRACE-VARIANT; R3 exits 1 TRACE-VARIANT plus manufactured findings; R5 sums
+TRACE-VARIANT; R3 exits 1 with ZERO manufactured findings (all 3 deleted) but
+refuses certification via the single NAMED shared-boundary tie; R5 sums
 427/565/565; R6 has no attribution-mode line (the capability did not exist).
 R4's verdict (TRACE-VARIANT) is the same before and after the fix.
 
@@ -149,12 +152,24 @@ real_t10 = HERE / "out/runner-audit-T10.json"
 real_prox = HERE / "out/proxy-audit.jsonl"
 if real_t10.exists() and real_prox.exists():
     rc, o = audit(real_t10, real_prox)
-    check("R3a exit 0 (old code: 1)", rc, 0)
-    check("R3b PROMPT-IDENTICAL (raw) (old code: TRACE-VARIANT + 3 manufactured "
-          "findings)", "RESULT: PROMPT-IDENTICAL (raw)" in o, True)
+    # RECORDED EXPECTATION CHANGE ON REAL DATA: the 3 manufactured findings
+    # (call-count + 2 alignment-offset STRUCTURALs) are DELETED -- a fabricated
+    # finding removed, NOT a real finding softened. The traces now match
+    # ([solicit,parser-retry,parser-retry]x3, byte-identical per index), but the
+    # one shared-boundary receipt stays NAMED and refuses exit 0 per contract.
+    check("R3a exit 1 via tie-refusal, NOT via manufactured findings (old: exit 1 "
+          "via TRACE-VARIANT + 3 findings)", rc, 1)
+    check("R3b NO manufactured findings survive",
+          ("VARIES(kind=trace" not in o and "STRUCTURAL(" not in o), True)
+    check("R3b2 traces match but verdict refuses certification",
+          ("RESULT: TRACE-NOT-CERTIFIABLE" in o
+           and "prompt INPUTS are byte-identical" in o), True)
     check("R3c attribution-mode is window-inferred (estimate)",
           "attribution-mode=window-inferred" in o, True)
-    check("R3d no ambiguous tie remains", "tie_ambiguous: 0" in o, True)
+    check("R3d one shared-boundary tie remains, NAMED, and refuses exit 0",
+          ("tie_ambiguous: 1" in o
+           and "TIE(kind=attribution," in o
+           and "RESULT: TRACE-NOT-CERTIFIABLE" in o), True)
     check("R3e calls/replica [3, 3, 3] (old: [4, 2, 4])",
           "calls/replica: [3, 3, 3]" in o, True)
     check("R3f boundary-ms receipts are named, not hidden",
@@ -200,9 +215,9 @@ print("=== R6. synthetic legacy variant: refuses to certify while ties remain ==
 rc, o = audit(legacy_out, legacy_prox)
 check("R6a attribution-mode is window-inferred (estimate)",
       "attribution-mode=window-inferred" in o, True)
-check("R6b the ambiguous tie is counted", "tie_ambiguous: 1" in o, True)
+check("R6b both ambiguous ties are counted", "tie_ambiguous: 2" in o, True)
 check("R6c the tie is NAMED with its boundary",
-      "boundary=3000" in o, True)
+      "candidates=[3000]" in o, True)
 check("R6d exit 1 — no certification while a tie is unresolved", rc, 1)
 check("R6e no PROMPT-IDENTICAL verdict is printed",
       "RESULT: PROMPT-IDENTICAL" in o, False)

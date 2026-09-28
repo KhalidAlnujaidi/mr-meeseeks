@@ -53,14 +53,18 @@ REQUEST-RECEIPT time, never on the completion-side `ts_ms`:
     with a one-sided error: floor(receipt) in {est, est+1} (ms flooring of
     both stamps plus latency rounding; the proxy's two time() reads are
     sub-ms apart). Consequences, used below:
-      * est == boundary-1 is the ONLY inferred value whose floor set
-        straddles a row boundary -> counted in `tie_ambiguous`, NAMED, and a
-        trace verdict refuses exit 0 while any remain (input verdicts are
-        unaffected by tie resolution).
-      * est == boundary is floor-deterministic (the later row owns it) and
-        is NAMED as a boundary-ms receipt: the sub-ms ordering question at a
-        boundary millisecond is unobservable from ms stamps and stays open
-        until Phase-2 call tags; it is printed, not silently certified.
+      * ANY receipt landing exactly on a SHARED row boundary
+        (finished_N == started_N+1, adjacent replicas on both sides) is
+        the tie the old window stole or dropped -> counted in
+        `tie_ambiguous`, NAMED as TIE(kind=attribution, ts=...,
+        candidates=[...]), and a trace verdict refuses exit 0 while any
+        remain (input verdicts are unaffected by tie resolution). The
+        half-open floor rule still assigns every call exactly one window
+        (partition-checked below), but the assignment is a truncation
+        coin-flip -- named, never silently certified.
+      * a receipt on a NON-shared boundary (outer span edge) is NAMED as
+        a boundary-ms receipt (sub-ms ordering unobservable from ms
+        stamps; Phase-2 call tags close this).
 Calls outside every row window (pre-roll warmup) are listed as orphans and
 excluded from replica traces — never silently dropped, never counted.
 
