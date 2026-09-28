@@ -606,6 +606,69 @@ one sample per cell, presented as a capability.
   a separate finding from this batch-scoping defect; the two must not be
   conflated.
 
+## F121 — a verdict name did two jobs, so a trace difference read as a premise change
+
+- **F121** — **The prompt-identity audit's verdict headline overstated its own
+  finding, and the script's evidence read two quantities under one name.**
+
+  The audit compares every replica's call-by-call request bodies. On the golem
+  T1 capture the decisive evidence was: **base solicit body BYTE-IDENTICAL
+  across all three replicas** (sha `01c90ae7321a6adc`), while the NUMBER AND
+  SEQUENCE of calls differed — replica 0 = 3 calls
+  (`warmup, solicit, parser-retry`), replica 1 = 2 (`solicit, parser-retry`),
+  replica 2 = 3 (`solicit, parser-retry, parser-retry`).
+
+  That is F112 (warmup placement) and F113 (parser-retry cascade reacting to
+  model output) — **control flow, not prompt inputs**. But the script printed a
+  single verdict, `RESULT: PROMPT-VARIANT — README 'same prompt' (F113/F115
+  wording) does not hold at byte level`, which reads as a *premise* change. A
+  reader taking it at face value would conclude k/n conflates prompt-variance
+  with rollout-variance and therefore that **F115 is undermined — which is
+  false**, because k/n measures model rollout variance conditional on
+  IDENTICAL inputs, exactly as F115 claims.
+
+  Two separate defects, both in how the verdict was computed:
+  1. **One name, two quantities.** `PROMPT-VARIANT` covered both a differing
+     solicitation body (a real premise change) and a differing call trace (F112/
+     F113 control flow). The headline could not distinguish them.
+  2. **The verdict read a STORED field.** The base-solicit sha was taken from
+     `req_sha256` while the call-by-call comparison used `req_body`, so the two
+     lines could contradict each other. Observed with an edited-body fixture:
+     the script printed `BYTE-IDENTICAL` while `call_index=0` reported
+     `UNEXPLAINED`.
+
+  A third defect was found while fixing it, in the **window attribution**: the
+  runner's adjacent replica windows touch exactly (`finished_prev ==
+  started_next`) and `ts_ms` is stamped at request receipt, so a
+  fully-inclusive `start <= ts <= finish` test claimed the boundary call in
+  BOTH windows — fabricating one call (measured on audit-T10: a `parser-retry`
+  appearing BEFORE any solicit, inflating replica 2's count to 4).
+
+  **Fix:** a verdict taxonomy — `TRACE-VARIANT` (exit 1) when the base solicit
+  body is byte-identical and only the call trace differs, stating explicitly
+  that the variance is F112/F113 control flow and that F115 is NOT undermined;
+  `PROMPT-VARIANT` (exit 1) reserved for a genuinely differing solicitation
+  body; `PROMPT-IDENTICAL (raw)` (exit 0) when nothing moved. Reason codes carry
+  `kind=input` vs `kind=trace`. The base-solicit sha is now derived from the
+  same `req_body` bytes the comparison uses. Windows are half-open
+  `[start, finish)` with a hard PARTITION assertion — a double-claimed or
+  dropped in-span call is now a FAIL (exit 2), never a printed fictional count.
+  The exit-code contract is unchanged: exit 1 on variance of EITHER kind, so
+  the fix removes an overstatement without silencing a real finding.
+
+  **Regression:** real golem-T1 capture → `TRACE-VARIANT`, exit 1;
+  corrupted-solicit fixture → `PROMPT-VARIANT`, exit 1; identical replicas →
+  `PROMPT-IDENTICAL`, exit 0.
+
+  **Residual, honestly unresolved (candidate for its own entry):** in the T10
+  capture, replica 2's declared `started_at_ms` equals replica 1's
+  `finished_at_ms`, and the call at that instant belongs to replica 1 — the
+  runner's replica-2 start stamp is early by one call. Half-open attribution
+  assigns the call correctly (rep1), but rep2's span still begins at that ms,
+  so T10 rep2 prints `['parser-retry','solicit','parser-retry','parser-retry']`.
+  This is a boundary race in the RUNNER's bookkeeping, not in the audit script,
+  and is recorded rather than papered over.
+
 ## Layout
 
 ```
