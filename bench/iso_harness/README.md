@@ -754,6 +754,85 @@ one sample per cell, presented as a capability.
   *written* is not a scrub that *works*: assert the effect on the child
   process, not the presence of the flag.
 
+## F124 — calls were attributed to rows by the wall clock, so a replica stole its neighbor's call and the wire sums double-counted
+
+- **F124** — **Call→row ownership is inferred from ms-truncated wall-clock
+  stamps, and adjacent replica rows touch at the same millisecond, so every
+  consumer re-guesses ownership and each guess lands differently.** This is
+  the F121 residual promoted to its own entry and enlarged by measurement;
+  full evidence, options, and the design call in
+  `DESIGN-F124-call-attribution.md`. Measured on the real `audit-T10`
+  capture (`runner-audit-T10.json` + `proxy-audit.jsonl`), 12 chat calls,
+  `finished_0 == started_1` and `finished_1 == started_2` EXACTLY:
+
+  1. **Trailing-call steal (the registered residual).** replica 1's final
+     `parser-retry` (issued 15 s inside its row — `ts−latency` proves it)
+     logs at `ts == finished_1 == started_2`; the audit's half-open
+     `[start, finish)` rule hands it to replica 2. Calls/replica print
+     `[4,2,4]` (truth `[3,3,3]`) and replica 2 shows the stray leading
+     `parser-retry`. *(Correction to F121's residual clause: half-open does
+     NOT assign that call to replica 1 — the tie falls to the later window;
+     the symptom list there is right, that clause was not.)*
+  2. **Leading-edge dual case.** The pre-roll warmup (F93: unjudged)
+     completed at `ts == started_0` exactly and is claimed into replica 0.
+     Clocks cannot distinguish a pre-roll trailing call from a row's first
+     call at a tie; stamp arithmetic can move the ambiguity, never remove it.
+  3. **The verdict flips.** True traces (receipt-time attribution) are
+     `[solicit, parser-retry, parser-retry]` × 3 with byte-identical bodies
+     per index (`60f41a02778c0a4c`, `24b095448083b9f2`, `24b095448083b9f2`):
+     T10's honest verdict is `PROMPT-IDENTICAL (raw)`, exit 0. The current
+     script prints `TRACE-VARIANT`, exit 1, plus 3 VARIES findings — one
+     call-count and two `STRUCTURAL(alignment-offset)` — that the two
+     attribution defects manufacture. (T1 keeps a GENUINE `TRACE-VARIANT`:
+     true traces 2/2/3, real F113 variance.)
+  4. **Wire sums double-count; blast radius extends past the audit.**
+     `referee.py`'s `[t0−500, t1+500]` inclusive window (the comment says
+     `[started_at_ms, finished_at_ms]`) counts 2 boundary calls TWICE and
+     the warmup's 20+2 tokens into replica 0: measured prompt sums
+     `427/565/565` vs truth `407/407/407`. These sums feed the published
+     cost axes (`analyze.py`). So the handover line "not published numbers"
+     holds for gate/spawn/exit columns and NOT for ISO_REPS>1 token columns.
+     The warmup leak is an **F112 recurrence at the attribution layer**:
+     F112 rescheduled warmup, but no filter excludes it from a row window.
+  5. **Mechanism correction:** `ts_ms` is stamped by `proxy.py` AFTER the
+     response is written back to the client, not "at request receipt" as
+     F121's mechanism sentence states; the ordering of the three boundary
+     stamps is unobservable at ms truncation — completion-side attribution
+     guesses at exactly the points that matter.
+
+  **Design call (recorded before any fix):** explicit per-replica call
+  indices — tags `(replica, call_index, phase)` carried in **request
+  headers** (`X-Iso-*`; never the request body — the audit hashes `req_body`
+  and a body field would fabricate PROMPT-VARIANT everywhere), proxy copies
+  them to log entries; consumers group by tag and demote time windows to a
+  tie-tolerant cross-check whose disagreement is an exit-2 FINDING ("runner
+  bookkeeping race"). Interim Phase 1 (landable without rebuild, no
+  dsh-lite-cpp touch): proxy logs `req_ts_ms` at receipt; audit + referee
+  attribute by receipt time, warmup excluded as pre-span, remaining ties
+  NAMED and trace verdicts refuse exit 0 while ties are unresolved; legacy
+  captures fall back to `ts_ms − latency_ms` flagged as inferred.
+  **Rejected: disjoint stamps** — they falsify honest timestamps (and
+  disagree with `steady_clock` `wall_ms` by construction), cannot
+  disambiguate the warmup/first-call tie, and leave the referee's ±500 ms
+  slop double-counting untouched (fixing that by spacing would mean faking
+  ≥500 ms gaps). Phase 2's header hook lives in
+  `dsh-lite-cpp/include/dshlite/llm_client.hpp` and must land COORDINATED
+  with the payload-draft stream holding that tree uncommitted.
+
+  **Regression (to be added with the fix; each FAILs on current code except
+  R4):** R1 tie+touch+warmup fixture → `[3,3,3]`, truth lists, warmup
+  orphaned; R2 same fixture → `PROMPT-IDENTICAL (raw)` exit 0; R3 REAL T10
+  capture → `PROMPT-IDENTICAL (raw)` (expectation change, recorded loudly:
+  a fabricated finding deleted, not a finding softened); R4 REAL golem-T1 →
+  unchanged `TRACE-VARIANT`; R5 referee sums → `407/407/407`,
+  zero double-claims; R6 legacy capture → `attribution-mode=window-inferred`,
+  ties named, no exit 0 while ties > 0; Phase-2: tag/window disagreement
+  fixture → exit 2.
+
+  **Open (honest scope):** whether any PUBLISHED row in `out/ISO_RESULTS.md`
+  inherited inflated tokens from the double-count needs its own re-derivation
+  pass from raw telemetry (F122's method). Not established here.
+
 ## Layout
 
 ```
