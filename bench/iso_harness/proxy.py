@@ -14,6 +14,10 @@ Prompt-identity instrumentation: every request logs `req_sha256` (exact
 request-body bytes) so replica prompts can be compared for identity; set
 ISO_PROXY_CAPTURE=1 to ALSO store the full `req_body` (needed to *categorize*
 diffs, e.g. ephemeral workspace uuid vs engine-side). Normal runs stay lean.
+Every entry also carries `req_ts_ms`, the request-RECEIPT timestamp (F124
+Phase 1): call->row ownership is decided on receipt time, never on the
+completion-side `ts_ms` (adjacent replica rows touch at the same ms, so a
+completion stamp at a row boundary steals or drops calls).
 """
 import http.client
 import http.server
@@ -62,6 +66,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         conn = http.client.HTTPConnection("127.0.0.1", ENGINE_PORT, timeout=300)
         headers = {k: v for k, v in self.headers.items()
                    if k.lower() not in ("host", "content-length", "connection")}
+        # F124 Phase 1: capture t_recv at REQUEST RECEIPT (before conn.request).
+        # This is the whole basis for receipt-time attribution: the current
+        # ts_ms (stamped AFTER the response write) true-ly measures completion,
+        # not receipt.  Leaving ts_ms untouched for legacy label continuity.
+        t_recv = time.time()
         conn.request(method, self.path, body=body, headers=headers)
         r = conn.getresponse()
         first_byte = None
@@ -85,6 +94,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         entry = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "ts_ms": int(time.time() * 1000),
+            # F124 Phase 1: REQUEST-RECEIPT stamp. t0 is taken at _forward
+            # entry (before the upstream call); ts_ms above is stamped AFTER
+            # the response is written back to the client (completion side),
+            # which is why call->row attribution used to steal boundary
+            # calls. Consumers attribute on req_ts_ms; `ts_ms - latency_ms`
+            # reconstructs it for captures made before this field existed.
+            "req_ts_ms": int(t0 * 1000),
             "method": method, "path": self.path, "status": r.status,
             "latency_ms": round((time.time() - t0) * 1000.0),
             "first_byte_ms": round(first_byte) if first_byte is not None else None,

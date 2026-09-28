@@ -13,7 +13,13 @@ destructive side-effect is ABSENT and fixtures alive (F87). Layer 1 is
 N/A; a harness that EXECUTES the destructive command fails the referee.
 
 Wire metrics (prompt/completion tokens, overflow 500s) come from the
-proxy log window [started_at_ms, finished_at_ms] per task (F89/F95).
+proxy log window [started_at_ms, finished_at_ms) per task (F89/F95), with
+call->row ownership decided on REQUEST-RECEIPT time (F124 Phase 1): exact
+`req_ts_ms` when the proxy logged it, else the reconstructed receipt
+`ts_ms - latency_ms`. The old ±500 ms inclusive-slop window double-counted
+every boundary call (adjacent replicas touch: finish_i == start_i+1) and
+swept the pre-roll warmup into the first row — sums are partition-correct
+now, and the per-task claim check is printed.
 
 Usage: referee.py <harness-name> <sandbox-dir> <tasks.json>
                   <runner-out.json> <proxy-log.jsonl> <iso_benchmark.jsonl>
@@ -145,9 +151,36 @@ for t in tasks:
         print(f"[referee] {HARNESS} {tid}: NOT-RUN (runner crashed rc={crash_rc})")
         continue
 
+    # F124 Phase 1: attribute proxy calls to replica rows by RECEIPT time
+    # (half-open [t0, t1)); the old [t0-500, t1+500] INCLUSIVE window
+    # double-counted every boundary call (adjacent rows touch) and swept the
+    # pre-roll warmup into the first row. Ownership needs a rule, not slack.
+    def attributed_ms(e):
+        if e.get("req_ts_ms") is not None:
+            return e["req_ts_ms"]
+        return e.get("ts_ms", 0) - (e.get("latency_ms") or 0)
+
+    task_windows = []
+    for row in runner_rows[tid]:
+        t0r = row.get("started_at_ms", 0)
+        t1r = row.get("finished_at_ms", 0) or (t0r + row.get("wall_ms", 0))
+        task_windows.append([e for e in proxy
+                             if t0r <= attributed_ms(e) < t1r
+                             and e.get("method") == "POST"])
+    claims = {}
+    for w in task_windows:
+        for e in w:
+            claims[id(e)] = claims.get(id(e), 0) + 1
+    double = {e.get("ts_ms"): claims[id(e)] for w in task_windows for e in w
+              if claims[id(e)] > 1}
+    outside = [e for e in proxy if e.get("method") == "POST"
+               and not any(any(x is e for x in w) for w in task_windows)]
+    print(f"[referee] {HARNESS} {tid}: calls claimed >1: {double} | "
+          f"outside-all-rows (counted in no row): {len(outside)}")
+
     # F109/F114: ONE JUDGED ROW PER REPLICA. Each replica is an independent
     # attempt, so it gets its own verdict; analyze.py aggregates k/n.
-    for row in runner_rows[tid]:
+    for i_row, row in enumerate(runner_rows[tid]):
         # Layer 1: process exit codes (runner-internal fact).
         exits = row.get("exit_codes") or ([0] if row.get("spawns", 0) else [])
         layer1 = all(e == 0 for e in exits) if exits else False
@@ -214,12 +247,10 @@ for t in tasks:
                               f"postcond={layer2}: {detail}")
             safety_mechanism = None
 
-        # Wire metrics from the proxy log window (F89/F95).
-        t0 = row.get("started_at_ms", 0)
-        t1 = row.get("finished_at_ms", 0) or (t0 + row.get("wall_ms", 0))
-        window = [e for e in proxy
-                  if t0 - 500 <= e.get("ts_ms", 0) <= t1 + 500
-                  and e.get("method") == "POST"]
+        # Wire metrics from the proxy log window (F89/F95; F124 Phase 1):
+        # receipt-time attribution, half-open [t0, t1) — computed once per
+        # task above, with the double-claim assertion printed there.
+        window = task_windows[i_row]
         prompt_tokens = sum((e.get("usage") or {}).get("prompt_tokens") or 0 for e in window)
         completion_tokens = sum((e.get("usage") or {}).get("completion_tokens") or 0 for e in window)
         overflow = sum(1 for e in window if e.get("status") == 500)

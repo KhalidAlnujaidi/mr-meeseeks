@@ -46,6 +46,24 @@ report; anything unmatched is reported as UNEXPLAINED — never silently ok):
   - ISO-8601 timestamps:      2026-09-27T12:00:00     (if a prompt embeds one)
 Nothing else is normalized: numbers, wording, tool names stay verbatim.
 
+F124 Phase 1 (receipt-time attribution) — call->row ownership is decided on
+REQUEST-RECEIPT time, never on the completion-side `ts_ms`:
+  - `req_ts_ms` (proxy.py stamps it at receipt) when present — exact;
+  - else `ts_ms - latency_ms` (the same receipt, reconstructed) — INFERRED,
+    with a one-sided error: floor(receipt) in {est, est+1} (ms flooring of
+    both stamps plus latency rounding; the proxy's two time() reads are
+    sub-ms apart). Consequences, used below:
+      * est == boundary-1 is the ONLY inferred value whose floor set
+        straddles a row boundary -> counted in `tie_ambiguous`, NAMED, and a
+        trace verdict refuses exit 0 while any remain (input verdicts are
+        unaffected by tie resolution).
+      * est == boundary is floor-deterministic (the later row owns it) and
+        is NAMED as a boundary-ms receipt: the sub-ms ordering question at a
+        boundary millisecond is unobservable from ms stamps and stays open
+        until Phase-2 call tags; it is printed, not silently certified.
+Calls outside every row window (pre-roll warmup) are listed as orphans and
+excluded from replica traces — never silently dropped, never counted.
+
 Usage:
   python3 audit_replica_prompt_identity.py OUT_JSON PROXY_JSONL
 """
@@ -114,14 +132,29 @@ def main() -> int:
               "rerun with ISO_PROXY_CAPTURE=1 (bodies are never retroactive)")
         return 2
 
-    # Group proxy calls into per-replica windows. HALF-OPEN [start, finish):
-    # adjacent replicas in out.json TOUCH exactly (finish_prev == start_next)
-    # and ts_ms is stamped at request receipt, so a fully-inclusive test
-    # double-attributes the boundary call — it lands in BOTH windows and
-    # fabricates a call neither replica made (observed: a "retry" appearing
-    # BEFORE the solicit at audit-T10 replica 2, inflating its count to 4).
-    # Half-open gives every call exactly one owner; the drop check below
-    # proves no in-span call was silently lost.
+    # F124 Phase 1: attribute every chat call to a replica row by REQUEST
+    # RECEIPT time. The old rule used ts_ms (completion side, stamped after
+    # the response was written back): adjacent rows touch exactly
+    # (finish_i == start_i+1) and completion stamps land ON boundaries, so
+    # the half-open test stole replica 1's trailing call into replica 2 and
+    # the pre-roll warmup into replica 0 (observed on the real T10 capture:
+    # [4,2,4] against a truth of [3,3,3]). On the receipt side each request
+    # is received while exactly one row scope is live.
+    def attributed(e):
+        if e.get("req_ts_ms") is not None:
+            return e["req_ts_ms"], "exact"
+        return e["ts_ms"] - (e.get("latency_ms") or 0), "inferred"
+
+    att = [(e, *attributed(e)) for e in chat]
+    modes = {m for _, _, m in att}
+    if modes == {"exact"}:
+        mode_label = "exact (req_ts_ms)"
+    elif modes == {"inferred"}:
+        mode_label = "window-inferred (estimate: floor(receipt) in {est, est+1})"
+    else:
+        mode_label = "mixed (exact where req_ts_ms was logged)"
+    print(f"attribution-mode={mode_label}")
+
     windows = []
     for r in sorted(rows, key=lambda r: r.get("replica", 0)):
         rep = r.get("replica", None)
@@ -129,24 +162,74 @@ def main() -> int:
             print(f"FAIL: replica {rep} lacks a time window "
                   "(started_at_ms/finished_at_ms) — cannot attribute calls")
             return 2
-        win = [e for e in chat
-               if r["started_at_ms"] <= e["ts_ms"] < r["finished_at_ms"]]
+        win = [e for e, a, m in att
+               if r["started_at_ms"] <= a < r["finished_at_ms"]]
         windows.append((rep, win))
 
-    # Attribution must be a PARTITION, not a hope: check no call is claimed by
-    # two windows and none inside the overall span was dropped.
-    span_calls = [e for e in chat
-                  if min(r["started_at_ms"] for r in rows)
-                  <= e["ts_ms"] < max(r["finished_at_ms"] for r in rows)]
-    claimed = [e for _, w in windows for e in w]
-    dup = [e["ts_ms"] for e in chat
-           if sum(1 for _, w in windows if e in w) > 1]
-    if dup or len(claimed) != len(span_calls):
+    # Tie accounting. Boundaries = every row start and finish (touching rows
+    # share one ms value). Inferred est == b-1: floor set {b-1, b} straddles
+    # the boundary -> AMBIGUOUS; blocks trace certification. Exact req == b,
+    # or inferred est == b: the floor rule assigns to the later row
+    # deterministically, but the receipt sits in the boundary millisecond —
+    # NAMED as a boundary-ms receipt (sub-ms ordering is unobservable from ms
+    # stamps; Phase-2 call tags close this).
+    boundaries = sorted({r["started_at_ms"] for r in rows}
+                        | {r["finished_at_ms"] for r in rows})
+    sorted_rows = sorted(rows, key=lambda r: r.get("replica", 0))
+    ties, bms = [], []
+    for e, a, m in att:
+        # A receipt exactly ON a shared boundary (finished_N == started_N+1)
+        # is the tie the old window stole or dropped: candidates are the
+        # adjacencies on both sides. The half-open floor rule still assigns
+        # every call exactly one window (checked below), but the assignment
+        # is a truncation coin-flip — NAMED, and a trace verdict refuses
+        # exit 0 while any remain.
+        cands = sorted({rr.get("replica") for rr in sorted_rows
+                        if rr["started_at_ms"] == a or rr["finished_at_ms"] == a})
+        if len(cands) > 1 or (m == "inferred"
+                              and any(a == b - 1 for b in boundaries)):
+            b = a if len(cands) > 1 else next(bb for bb in boundaries
+                                              if a == bb - 1)
+            ties.append((e, a, sorted(cands) if cands else [b]))
+            print(f"TIE(kind=attribution, ts={a}, "
+                  f"candidates={sorted(cands) if cands else [b]})")
+        elif any(a == b for b in boundaries):
+            bms.append(f"{classify(e['req_body'])}@{a}")
+    print(f"tie_ambiguous: {len(ties)}"
+          + (f" — {', '.join(t[0]['req_body'] and classify(t[0]['req_body']) + '@' + str(t[1]) for t in ties)}" if ties else ""))
+    if bms:
+        print(f"boundary-ms receipts (floor rule assigns to the later row; "
+              f"sub-ms ordering unobservable from ms stamps until Phase-2 "
+              f"tags): {len(bms)} call(s) [{', '.join(bms)}]")
+
+    # Attribution must be a PARTITION, not a hope: no call may be claimed by
+    # two windows (identity, not dict equality — two byte-equal entries were
+    # indistinguishable under the old `e in w` test), and every call inside
+    # the overall span must be claimed exactly once. Calls outside every row
+    # are ORPHANS (pre-roll warmup etc.) — listed, excluded, never counted.
+    claimed_ids = {id(e) for _, w in windows for e in w}
+    dup = [a for e, a, m in att
+           if sum(1 for _, w in windows if any(x is e for x in w)) > 1]
+    span_lo = min(r["started_at_ms"] for r in rows)
+    span_hi = max(r["finished_at_ms"] for r in rows)
+    in_span = [a for _, a, _ in att if span_lo <= a < span_hi]
+    if dup or len(claimed_ids) != len(in_span):
         print(f"FAIL: window attribution is not a partition — "
-              f"{len(dup)} call(s) claimed twice, {len(claimed)} claimed vs "
-              f"{len(span_calls)} inside the overall span; calls/replica "
+              f"{len(dup)} call(s) claimed twice, {len(claimed_ids)} claimed "
+              f"vs {len(in_span)} inside the overall span; calls/replica "
               "would be fiction")
         return 2
+    orphans = [(e, a) for e, a, m in att if id(e) not in claimed_ids]
+    for label, sel in (("pre-span", [o for o in orphans if o[1] < span_lo]),
+                       ("post-span", [o for o in orphans if o[1] >= span_hi])):
+        if sel:
+            by_class = {}
+            for e, a in sel:
+                c = classify(e["req_body"])
+                by_class[c] = by_class.get(c, 0) + 1
+            named = "[" + ", ".join(f"{c}:{n}" for c, n in sorted(by_class.items())) + "]"
+            print(f"orphan/{label}: {len(sel)} call(s) {named} — excluded "
+                  "from replica traces (counted in no row)")
 
     print(f"replicas: {[w[0] for w in windows]}  "
           f"calls/replica: {[len(w[1]) for w in windows]}")
@@ -246,6 +329,29 @@ def main() -> int:
           "-> BYTE-IDENTICAL" if None not in tok.values()
           and len(set(tok.values())) == 1 else "-> VARIES")
 
+    # ---- F124 Phase 1: trace-certification gate ---------------------------
+    # Input (base-solicit) verdicts do not depend on tie resolution; the
+    # TRACE verdict does: while any call/row tie is ambiguous, a trace
+    # identity — even a matching one — cannot be certified from stamps
+    # alone. Refuse loudly (exit 1) rather than print a verdict the evidence
+    # cannot carry.
+    input_varies = (None in tok.values() or len(set(tok.values())) != 1)
+    if ties:
+        if input_varies:
+            print("RESULT: PROMPT-VARIANT — the base solicitation body is "
+                  "NOT byte-identical across replicas (input variance; it "
+                  "does not depend on tie resolution). NOTE: the trace "
+                  f"check is NOT CERTIFIABLE — {len(ties)} ambiguous tie(s) "
+                  "named above.")
+        else:
+            print(f"RESULT: TRACE-NOT-CERTIFIABLE — {len(ties)} call/row "
+                  "tie(s) remain ambiguous under receipt-time attribution "
+                  "(named above); prompt INPUTS are byte-identical, but the "
+                  "call traces cannot be certified from stamps alone.")
+        for f in findings:
+            print(" ", f)
+        return 1
+
     if raw_identical or norm_identical:
         verdict = ("PROMPT-IDENTICAL (raw)" if raw_identical else
                    "PROMPT-IDENTICAL (after allowlist normalization)")
@@ -254,7 +360,6 @@ def main() -> int:
         return 0
 
     # ---- exit-1 verdicts: separate INPUT variance from TRACE variance ----
-    input_varies = (None in tok.values() or len(set(tok.values())) != 1)
     input_findings = [f for f in findings if "kind=input" in f]
     mech = sorted({c for _, win in windows
                    for c in (classify(e["req_body"]) for e in win)
