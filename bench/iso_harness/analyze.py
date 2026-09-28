@@ -232,6 +232,20 @@ for h in harnesses:
     out.append(f"| {h} | {p} | {c} | {p // n if n else 0} | {ratio} |")
 out.append("")
 
+# F124/F125 token-audit caveat (2026-09-28). Rows judged before Phase-1
+# receipt-time attribution carry pre-fix window sums (warmup and boundary
+# calls could be counted into a row, and a boundary call into two). Whether a
+# given published row is affected is NOT re-derivable for golem/langgraph
+# (their proxy logs are gone from the tree — F125); smolagents re-derives
+# exactly. Remove this note only after a clean re-run under the receipt-time
+# rule.
+out.append("> **Token/cost caveat (F124/F125):** rows judged before 2026-09-28 "
+           "carry pre-fix call attribution. Measured where re-derivable: "
+           "golem/T1 rep0 published 424 vs receipt-truth 404 prompt tokens "
+           "(+20 = warmup). Do not quote the golem/langgraph token or bloat "
+           "columns until a clean re-run — their raw evidence is gone (F125).")
+out.append("")
+
 # 3. Latency
 out.append("## Wall-Clock Latency & Speedup")
 out.append("")

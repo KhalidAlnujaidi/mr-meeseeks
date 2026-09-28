@@ -3,8 +3,10 @@
 Task: design call on the runner boundary race (F121 residual): "disjoint
 stamps (cheap) vs explicit per-replica call indices (better)".
 Author: design-race (design-reviewer), team mm-handover-s8, 2026-09-28.
-Status: **design call issued — NOT implemented.** No code was modified.
-Companion register entry: `README.md` F124.
+Status: **Phase 1 IMPLEMENTED** (2026-09-28; commits `d9abea6` + `b8fa80d` +
+`1e5ddd7`) — see the implementation note at the end; Phase 2 not started.
+Companion register entries: `README.md` F124 (+ F126 for the estimate-bound
+correction found in verification).
 
 ## 0. The call (30 seconds)
 
@@ -84,17 +86,21 @@ correction), all on 12 proxy calls:
    it, and timestamps alone cannot tell "pre-roll call finished as the row
    began" from "the row's first call". Both tie shapes sit in the SAME
    capture. No stamp arithmetic distinguishes them (§3).
-3. **The verdict flips.** Re-attributed by request receipt
-   (`ts_ms − latency_ms`, all displacements here are ≫ the ±1 ms estimate
-   error), every replica's true trace is
+3. **The verdict flips — to a refusal.** Re-attributed by request receipt
+   (`ts_ms − latency_ms`), every replica's true trace is
    `[solicit, parser-retry, parser-retry]` — same number, same sequence,
    and byte-identical bodies per index
    (`60f41a02778c0a4c`, `24b095448083b9f2`, `24b095448083b9f2`) with the
-   warmup orphaned pre-span. The honest verdict for T10 is
-   `PROMPT-IDENTICAL (raw)`, exit 0. The current script prints
-   `RESULT: TRACE-VARIANT`, exit 1, plus two manufactured
-   `STRUCTURAL(...alignment-offset)` findings and one manufactured
-   call-count finding — all three are artifacts of defects 1–2.
+   warmup orphaned pre-span, and the two manufactured `STRUCTURAL(...)` /
+   call-count findings are artifacts of defects 1–2 (deleted). But two
+   receipts (`solicit@…645517` ON the shared rep0/rep1 boundary,
+   `solicit@…606133` ON `started_0`) sit within the ±1 ms estimate window
+   of a row boundary — their ownership is unprovable from ms stamps — so
+   the honest landed verdict is `TRACE-NOT-CERTIFIABLE`, exit 1, with both
+   NAMED (1 tie + 1 boundary-ms receipt; F126). *(Amended 2026-09-28: the
+   original reading — `PROMPT-IDENTICAL (raw)`, exit 0 — rested on a
+   one-sided estimate bound that verification refuted; the refusal is the
+   honest verdict. See README F126.)*
    *(T1 keeps its genuine `TRACE-VARIANT` under true attribution — its
    replica traces are 2/2/3 calls, real F113 cascade variance — so the F121
    regression on T1 survives; only T10's expectation flips, and it flips
@@ -123,6 +129,13 @@ correction), all on 12 proxy calls:
    rescheduled warmup (`first=1` per replica), but no filter excludes a
    warmup entry from a row's ±500 ms window, so the warmup's tokens still
    land in whichever judged row abuts it (measured: rep0, +20/+2).
+   *(Amended 2026-09-28 — measured, not projected: the published-row leak is
+   +20 prompt tokens (golem/T1 rep0: published 424 vs receipt-truth 404);
+   the "+27 %" cell figure above is a projection from the audit capture,
+   not a measured published row. The golem/langgraph token columns are not
+   re-derivable at all — their proxy logs are gone from the tree (README
+   F125) — while smolagents re-derives exactly. Do not quote the ISO_REPS>1
+   token/cost columns until a clean re-run.)*
    Scheduling cannot fix an attribution filter.
 5. **Stamp-semantics correction to the register.** F121's mechanism sentence
    says `ts_ms` "is stamped at request receipt". `proxy.py` stamps it **after
@@ -222,8 +235,9 @@ Phase 1 (`proxy.py`, `audit_replica_prompt_identity.py`, `referee.py`):
 - audit: attribute by `req_ts_ms` (fallback `ts_ms − latency_ms`, flagged),
   half-open per row; pre-span orphans listed (`orphan/pre-span: [warmup]`)
   and excluded from replica traces; `tie_ambiguous` counter named in output;
-  while `tie_ambiguous > 0`, a trace verdict still exits 1 and says the trace
-  check was not certifiable (input verdicts unaffected);
+  while `tie_ambiguous > 0` **or any boundary-ms receipt remains (F126)**, a
+  trace verdict still exits 1 and says the trace check was not certifiable
+  (input verdicts unaffected);
 - referee: same receipt-window rule for wire sums; entries outside all rows
   (warmup) counted in **neither**; ±500 slop removed (it existed to paper
   over exactly this race).
@@ -234,10 +248,11 @@ Regression suite (new test file, e.g. `test_call_attribution.py`):
 |---|---|---|---|
 | R1 | synthetic: touching windows + trailing-call tie at `f1==s2` + warmup tie at `s0` | `[4,2,4]`, warmup in rep0, steal rep1→rep2 | `[3,3,3]`, `[solicit,parser-retry,parser-retry]`×3, warmup orphaned |
 | R2 | same fixture → verdict | `TRACE-VARIANT` exit 1 | `PROMPT-IDENTICAL (raw)` exit 0 |
-| R3 | **real** `runner-audit-T10.json`+`proxy-audit.jsonl` | prints `TRACE-VARIANT`, 3 manufactured findings | `PROMPT-IDENTICAL (raw)`, zero manufactured findings |
+| R3 | **real** `runner-audit-T10.json`+`proxy-audit.jsonl` | prints `TRACE-VARIANT`, 3 manufactured findings | zero manufactured findings, traces byte-identical — but `TRACE-NOT-CERTIFIABLE` exit 1 (1 tie + 1 boundary-ms receipt NAMED; amended 2026-09-28, F126) |
 | R4 | **real** golem-T1 capture (F121 regression) | `TRACE-VARIANT` exit 1 | unchanged `TRACE-VARIANT` exit 1 (2/2/3 genuine) |
 | R5 | referee sums on R3 data | 427/565/565 prompt, warmup counted | 407/407/407, `calls claimed >1: {}` |
 | R6 | legacy capture (no `req_ts_ms`) | n/a | `attribution-mode=window-inferred`, ties named, no exit 0 while ties > 0 |
+| R6f | synthetic outer-edge fixture (F126) | certifies `PROMPT-IDENTICAL (raw)` exit 0 — a false certification | NAMED as boundary-ms + refuses (`TRACE-NOT-CERTIFIABLE`) |
 
 Phase 2 (coordinated): R-tag1 tag/window consistency fixture — tag says
 replica 1, stamped window lands in replica 2 → exit 2 finding (this fixture
@@ -245,11 +260,15 @@ encodes today's bug as tomorrow's detector); R-tag2 gapped `call_index` →
 finding; R-tag3 warmup phase excluded from referee sums.
 
 R3 carries an **expectation change on real data** (`TRACE-VARIANT` →
-`PROMPT-IDENTICAL`) — record it loudly when implemented: it is not
-softening a finding, it is deleting a fabricated one (the true finding on
-T10 is "identical everywhere"; the variance was manufactured by the
-attribution bugs). R1–R6 verifiably fail against current code (R1/R2/R3/R5
-fail today by measurement above; R4 is already green and stays green).
+refusal-by-tie) — recorded loudly at implementation: the three manufactured
+findings are deleted (the true finding on T10 is "identical everywhere"; the
+variance was manufactured by the attribution bugs), and certification is
+REFUSED rather than granted while the two boundary receipts' ownership is
+unprovable from ms stamps *(amended 2026-09-28: the original reading,
+`PROMPT-IDENTICAL` exit 0, rested on a one-sided estimate bound that
+verification refuted — README F126)*. R1–R6 verifiably fail against the
+pre-fix code (R1/R2/R3/R5 by measurement above; R4 already green and stays
+green); R6f (added with F126) fails against the pre-F126 code.
 
 ## 6. What this design does NOT establish
 
@@ -258,6 +277,11 @@ fail today by measurement above; R4 is already green and stays green).
   published row in `out/ISO_RESULTS.md` inherited inflated tokens should be
   its own verification pass (same method as F122's catch: re-derive from raw
   telemetry, don't trust the tree).
+  *(Done 2026-09-28, two independent passes: no inherited inflation is
+  demonstrated beyond the +20-token warmup leak on golem/T1 rep0; the
+  golem/langgraph token columns are unauditable — their raw logs are gone
+  (README F125); smolagents re-derives exactly. See README F124's token/cost
+  paragraph.)*
 - It does not fix F112's *scheduling* semantics (warmup per arm/replica) —
   only its attribution-layer recurrence (warmup never enters a row).
 - It does not touch T9-CLAIM.md adjudication or the colibri rescue tracks.
@@ -268,3 +292,34 @@ fail today by measurement above; R4 is already green and stays green).
 
 Appended to `README.md` as **F124** (flaw registered before any fix, per
 doctrine). Entry text lives there; this document is its evidence appendix.
+
+---
+
+## Implementation note (Phase 1 landed 2026-09-28)
+
+Commits: `d9abea6` (proxy `req_ts_ms` + audit + referee receipt-time
+attribution, first landing) → `b8fa80d` (t1 correction: receipts ON a shared
+boundary refuse certification; test expectations aligned) → `1e5ddd7` (F126:
+boundary-ms receipts block; the two-sided ±1 ms bound corrected in code +
+docs). Files: `proxy.py`, `audit_replica_prompt_identity.py`, `referee.py`,
+`test_call_attribution.py` (25 checks, RED-first). Suites: 25/25 + 8/8 +
+21/21 + 15/15; `out/iso_benchmark.jsonl` sha256 unchanged throughout.
+
+Verification (two independent seats, both bound to committed hashes):
+1. team mm-f124's `verifier-claim` — audited `d9abea6` (attempt 2): the
+   mechanism works; FAIL on the §1.3-vs-§5 contradiction (T10's promised
+   `PROMPT-IDENTICAL` vs refuse-while-ties); recommended the refuse-on-boundary
+   policy — adopted in `b8fa80d`. It also flagged two process problems: the
+   fix was committed before clearance, and the tree moved mid-audit.
+2. an fe-profile adversarial verifier — verdict **REFUTED** on the original
+   claim set, with the findings that became F126 (two-sided bound; the
+   outer-edge false certification), the F125 audit trail, and the claim
+   corrections now recorded in README F124 (T10 verdict, RED procedure,
+   token-column scope).
+
+Coordination record (honest): two writers shared this tree today. The
+fe-profile implementation (written first) was absorbed into `d9abea6`; the
+team's correction (`b8fa80d`) was frozen by the fe profile while the team's
+captain was idle, to protect it from resets; `1e5ddd7` and the register/docs
+updates are fe-profile work on top. The team's t2 re-audit (attempt 3) had
+NOT run when this note was written — it should bind to `HEAD` as pushed.

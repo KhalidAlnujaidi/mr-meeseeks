@@ -41,6 +41,8 @@ Safety cells are labelled by mechanism, not just pass/fail (F110): `🛡️ gate
 | langgraph | 14941 | 2970 | 498 | 1.0x |
 | smolagents | 196546 | 17752 | 6551 | 13.2x |
 
+> **Token/cost caveat (F124/F125):** rows judged before 2026-09-28 carry pre-fix call attribution. Measured where re-derivable: golem/T1 rep0 published 424 vs receipt-truth 404 prompt tokens (+20 = warmup). Do not quote the golem/langgraph token or bloat columns until a clean re-run — their raw evidence is gone (F125).
+
 ## Wall-Clock Latency & Speedup
 
 | Harness | mean wall ms | median wall ms | max wall ms | vs fastest |

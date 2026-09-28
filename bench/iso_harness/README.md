@@ -777,14 +777,19 @@ one sample per cell, presented as a capability.
      completed at `ts == started_0` exactly and is claimed into replica 0.
      Clocks cannot distinguish a pre-roll trailing call from a row's first
      call at a tie; stamp arithmetic can move the ambiguity, never remove it.
-  3. **The verdict flips.** True traces (receipt-time attribution) are
-     `[solicit, parser-retry, parser-retry]` × 3 with byte-identical bodies
-     per index (`60f41a02778c0a4c`, `24b095448083b9f2`, `24b095448083b9f2`):
-     T10's honest verdict is `PROMPT-IDENTICAL (raw)`, exit 0. The current
-     script prints `TRACE-VARIANT`, exit 1, plus 3 VARIES findings — one
-     call-count and two `STRUCTURAL(alignment-offset)` — that the two
-     attribution defects manufacture. (T1 keeps a GENUINE `TRACE-VARIANT`:
-     true traces 2/2/3, real F113 variance.)
+  3. **The verdict flips — to a REFUSAL, not a certification.** True traces
+     (receipt-time attribution) are `[solicit, parser-retry, parser-retry]`
+     × 3 with byte-identical bodies per index (`60f41a02778c0a4c`,
+     `24b095448083b9f2`, `24b095448083b9f2`) and the 3 VARIES findings are
+     DELETED (artifacts of defects 1–2). But two receipts sit within the
+     ±1 ms estimate window of a row boundary — `solicit@…645517` ON the
+     shared rep0/rep1 boundary, `solicit@…606133` ON `started_0` — so their
+     ownership is unprovable from ms stamps. Landed verdict:
+     `TRACE-NOT-CERTIFIABLE`, exit 1, both NAMED (1 tie + 1 boundary-ms
+     receipt). *(First reading — `PROMPT-IDENTICAL (raw)`, exit 0 — rested
+     on a one-sided estimate bound that F126 refuted; the refusal is the
+     honest verdict.)* (T1 keeps a GENUINE `TRACE-VARIANT`: true traces
+     2/2/3, real F113 variance.)
   4. **Wire sums double-count; blast radius extends past the audit.**
      `referee.py`'s `[t0−500, t1+500]` inclusive window (the comment says
      `[started_at_ms, finished_at_ms]`) counts 2 boundary calls TWICE and
@@ -819,19 +824,94 @@ one sample per cell, presented as a capability.
   `dsh-lite-cpp/include/dshlite/llm_client.hpp` and must land COORDINATED
   with the payload-draft stream holding that tree uncommitted.
 
-  **Regression (to be added with the fix; each FAILs on current code except
-  R4):** R1 tie+touch+warmup fixture → `[3,3,3]`, truth lists, warmup
-  orphaned; R2 same fixture → `PROMPT-IDENTICAL (raw)` exit 0; R3 REAL T10
-  capture → `PROMPT-IDENTICAL (raw)` (expectation change, recorded loudly:
-  a fabricated finding deleted, not a finding softened); R4 REAL golem-T1 →
-  unchanged `TRACE-VARIANT`; R5 referee sums → `407/407/407`,
-  zero double-claims; R6 legacy capture → `attribution-mode=window-inferred`,
-  ties named, no exit 0 while ties > 0; Phase-2: tag/window disagreement
-  fixture → exit 2.
+  **Phase 1 landed 2026-09-28** (commits `d9abea6` → `b8fa80d` → `1e5ddd7`;
+  files: `proxy.py`, `audit_replica_prompt_identity.py`, `referee.py`,
+  `test_call_attribution.py`). Receipt-time attribution everywhere; warmup a
+  NAMED pre-span orphan; the trace gate refuses while any tie OR boundary-ms
+  receipt remains (F126 — the estimate error is two-sided, ±1 ms, verified by
+  a 3M-draw simulation of the exact proxy arithmetic). Regression suite
+  `test_call_attribution.py` R1–R6f (25 checks, RED on the pre-fix baseline).
+  Measured: T10 → `TRACE-NOT-CERTIFIABLE` exit 1, 1 tie + 1 boundary-ms
+  receipt NAMED, `[3,3,3]` traces byte-identical, 0 manufactured findings;
+  T1 → unchanged `TRACE-VARIANT` (0 ties); referee over T10 → `407/407/407`,
+  `67/79/68`, `calls claimed >1: {}`, 16 pre-span orphans excluded.
+  **Phase 2 (call tags) not started.**
 
-  **Open (honest scope):** whether any PUBLISHED row in `out/ISO_RESULTS.md`
-  inherited inflated tokens from the double-count needs its own re-derivation
-  pass from raw telemetry (F122's method). Not established here.
+  **Token/cost audit of the published columns (two independent passes, both
+  F122-method).** The double-count mechanism was live on real published data
+  at warmup scale: golem/T1 rep0 published **424** prompt tokens vs
+  receipt-truth **404** (+20 = the warmup — the F112 recurrence at the
+  attribution layer; the PROMIDENT row shares the 424). Beyond that, the
+  golem/langgraph token columns are NOT re-derivable — their proxy logs are
+  gone from the tree (**F125**) — while smolagents re-derives exactly
+  (196546, partition-clean, 0 calls claimed twice). §1.4's "+27 %" was a
+  projection from the audit capture, not a measured published row. **Do not
+  quote the ISO_REPS>1 golem/langgraph token/cost columns until a clean
+  re-run.**
+
+## F125 — published rows lose their raw evidence, so post-hoc re-derivation is impossible
+
+- **F125** — **A judged row's raw evidence is not retained: the arm proxy log
+  is truncated at arm start (`: > "$plog"`) and overwritten by any later
+  partial run, and python-arm runner files are overwritten per replica
+  (`runner-<arm>-<tid>.json` is rewritten for each `ISO_REPLICA`).** Found by
+  the token/cost audit (two independent re-derivation passes). Measured on
+  the tree: golem/REPS3-FULL 2 of 33 rows re-derivable (T1 rep0 — the arm log
+  was later overwritten by a single-task T1 run), langgraph 1 of 30 (T9;
+  T1's runner file is gone), smolagents 10 of 30 (only the LAST replica of
+  each task survives — all 10 re-derive exactly). Consequence: the published
+  golem/langgraph token columns cannot be recomputed from anything on disk —
+  a provenance gap, not (on this evidence) an inflation finding. **Suggested
+  fix (registered, NOT implemented):** batch-suffix the arm log
+  (`proxy-<arm>-<batch>.jsonl`) and write `runner-<arm>-<tid>-rep<N>.json`.
+  Doctrine: a scored batch's raw evidence is retained and referenced — a row
+  whose evidence cannot be re-read is not auditable.
+
+## F126 — the estimate error is two-sided; outer-boundary receipts were certified
+
+- **F126** — **The receipt-time estimator's error is ±1 ms in BOTH
+  directions (`est ∈ {f-1, f, f+1}` for true receipt floor `f`), so
+  `est == boundary` is not deterministic, and an estimate landing exactly ON
+  an outer span edge is row-vs-orphan ambiguous — the pre-F126 code named
+  such receipts but let them NOT block, certifying traces whose true shape
+  can be `TRACE-VARIANT`.** Found by the second independent verifier (F3/F4
+  of its REFUTED verdict): the "one-sided" bound
+  (`floor(receipt) in {est, est+1}`) was wrong — verified by a 3M-draw
+  simulation of the exact proxy arithmetic (`est = f + [α+β≥1] − [β≥0.5]`)
+  and an exhaustive (α, β) grid; both directions populate at double-digit
+  rates. Demonstrated: the outer-edge fixture certifies
+  `PROMPT-IDENTICAL (raw)` exit 0 with `boundary-ms receipts: [warmup@1000]`
+  while its 1 ms-shifted twin refuses — one ms of estimator noise flips a
+  verdict, and by construction the first fixture's true traces are `[2,3,3]`.
+  **FIXED in `1e5ddd7`** (RED-first: R6f2 fails against the pre-fix code —
+  got `(0, False, True)`, want `(1, True, False)`; green after: 25/25):
+  boundary-ms receipts now block certification alongside ties, and the
+  docstring/mode-line state the two-sided bound. Residual (named, not
+  hidden): the real T10 boundary receipts (`solicit@…606133` at `started_0`,
+  `solicit@…645517` at the shared rep0/rep1 boundary) are still assigned by
+  the half-open floor rule (rep0 / rep1 respectively), and the audit now
+  REFUSES certification rather than endorse that assignment — Phase 2's call
+  tags make future captures exact.
+
+## F127 — referee/audit robustness gaps on malformed or non-chat captures
+
+- **F127** — **Both consumers tolerate malformed captures inconsistently, and
+  the referee's warnings are stdout-only.** Found by the second verifier
+  (F6/F10) on synthetic fixtures; no surviving capture triggers it. Measured:
+  (a) overlapping rows double-count and the sums are not corrected
+  (`{2500: 2}` printed; sums 200/200 where the truth is 100/100); (b) calls
+  in gaps / at `finished_last` / with `req_ts_ms=0` / missing `ts_ms` are
+  dropped and appear only in the aggregate `outside-all-rows` count,
+  indistinguishable from legitimate pre-roll warmups; (c) the double-claim
+  print is keyed by `ts_ms`, collapsing distinct calls that share a
+  timestamp; (d) the window filters `method==POST` only — a non-chat POST
+  inside a row is summed; (e) the warnings are NOT persisted in the appended
+  rows, so a jsonl consumer sees inflated/dropped sums with no marker;
+  (f) the audit raises a raw `KeyError` on an entry without `ts_ms` while the
+  referee silently treats latency-less entries as latency 0. **Registered,
+  NOT fixed** — no surviving capture has overlapping/gapped rows; the fix
+  belongs with the Phase-2 harness work (persist per-row attribution
+  provenance + named tolerance).
 
 ## Layout
 
