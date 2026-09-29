@@ -21,6 +21,12 @@ every boundary call (adjacent replicas touch: finish_i == start_i+1) and
 swept the pre-roll warmup into the first row — sums are partition-correct
 now, and the per-task claim check is printed.
 
+F127: malformed captures are consumed BY NAME — overlapping rows are
+single-owned (first-match, named), calls outside all rows are classified
+(pre-span / gap / post-span), untimestamped entries are dropped with a
+count, non-chat POSTs are excluded, and every warning is persisted in the
+judged rows (`attribution_warnings`).
+
 Usage: referee.py <harness-name> <sandbox-dir> <tasks.json>
                   <runner-out.json> <proxy-log.jsonl> <iso_benchmark.jsonl>
 """
@@ -155,28 +161,106 @@ for t in tasks:
     # (half-open [t0, t1)); the old [t0-500, t1+500] INCLUSIVE window
     # double-counted every boundary call (adjacent rows touch) and swept the
     # pre-roll warmup into the first row. Ownership needs a rule, not slack.
+    #
+    # F127 hardening — malformed captures are consumed BY NAME, never
+    # silently: (a) overlapping rows no longer double-count (first-match
+    # single-owner rule, named); (b) calls outside all rows are classified
+    # (pre-span / gap / post-span) instead of one aggregate; (c) an entry with
+    # no usable timestamp is named and dropped, not read as ts 0; (d) a
+    # latency-less receipt is named (reconstructed with latency 0); (e) only
+    # chat-completion POSTs are summed (a non-chat POST inside a row used to
+    # be swept in); (f) every warning is PERSISTED in the judged rows
+    # (attribution_warnings), so a jsonl consumer can see the anomaly.
     def attributed_ms(e):
-        if e.get("req_ts_ms") is not None:
-            return e["req_ts_ms"]
-        return e.get("ts_ms", 0) - (e.get("latency_ms") or 0)
+        r = e.get("req_ts_ms")
+        if r:
+            return r
+        t = e.get("ts_ms")
+        if t is None:
+            return None
+        return t - (e.get("latency_ms") or 0)
 
-    task_windows = []
+    def is_chat(e):
+        return (e.get("method") == "POST"
+                and "chat/completions" in str(e.get("path", "")))
+
+    chat = [e for e in proxy if is_chat(e)]
+    untimestamped = [e for e in chat if attributed_ms(e) is None]
+    latency_less = [e for e in chat if attributed_ms(e) is not None
+                    and not e.get("req_ts_ms") and not e.get("latency_ms")]
+    non_chat_post = [e for e in proxy
+                     if e.get("method") == "POST" and not is_chat(e)]
+
+    spans = []
     for row in runner_rows[tid]:
         t0r = row.get("started_at_ms", 0)
         t1r = row.get("finished_at_ms", 0) or (t0r + row.get("wall_ms", 0))
-        task_windows.append([e for e in proxy
-                             if t0r <= attributed_ms(e) < t1r
-                             and e.get("method") == "POST"])
+        spans.append((t0r, t1r))
+    task_windows = [[] for _ in spans]
+    attribution_warnings = []
+    for e in chat:
+        m = attributed_ms(e)
+        if m is None:
+            continue
+        owners = [i for i, (t0r, t1r) in enumerate(spans) if t0r <= m < t1r]
+        if not owners:
+            continue
+        if len(owners) > 1:
+            attribution_warnings.append(
+                f"overlapping rows claim call ts={e.get('ts_ms')} "
+                f"(rows {owners}) — assigned to row {owners[0]} "
+                "(first-match rule)")
+        task_windows[owners[0]].append(e)
+
+    inside = {id(e) for w in task_windows for e in w}
+    # F127: untimestamped entries are counted separately (below) — they must
+    # not reach the pre/gap/post classifier, which compares against ints.
+    outside = [e for e in chat
+               if id(e) not in inside and attributed_ms(e) is not None]
+    if spans:
+        t_first = min(t0 for t0, _ in spans)
+        t_last = max(t1 for _, t1 in spans)
+        pre = [e for e in outside if attributed_ms(e) < t_first]
+        post = [e for e in outside if attributed_ms(e) >= t_last]
+        gap = [e for e in outside if t_first <= attributed_ms(e) < t_last]
+    else:
+        pre, gap, post = outside, [], []
+    if outside:
+        attribution_warnings.append(
+            f"outside-all-rows: {len(outside)} (pre-span {len(pre)}, "
+            f"gap {len(gap)}, post-span {len(post)})")
+    if untimestamped:
+        attribution_warnings.append(
+            f"untimestamped chat calls dropped: {len(untimestamped)}")
+    if latency_less:
+        attribution_warnings.append(
+            f"latency-less receipts reconstructed (latency=0): "
+            f"{len(latency_less)}")
+    if non_chat_post:
+        attribution_warnings.append(
+            f"non-chat POSTs excluded: {len(non_chat_post)}")
+
+    # Self-check: with single-owner assignment no call can be claimed twice;
+    # kept as an assertion against future refactors (F127 kept the richer key
+    # so two distinct calls that share a ts_ms stay distinguishable).
     claims = {}
     for w in task_windows:
         for e in w:
             claims[id(e)] = claims.get(id(e), 0) + 1
-    double = {e.get("ts_ms"): claims[id(e)] for w in task_windows for e in w
-              if claims[id(e)] > 1}
-    outside = [e for e in proxy if e.get("method") == "POST"
-               and not any(any(x is e for x in w) for w in task_windows)]
+    double = {f"ts={e.get('ts_ms')} req={e.get('req_ts_ms')} "
+              f"path={e.get('path')}": claims[id(e)]
+              for w in task_windows for e in w if claims[id(e)] > 1}
     print(f"[referee] {HARNESS} {tid}: calls claimed >1: {double} | "
-          f"outside-all-rows (counted in no row): {len(outside)}")
+          f"outside-all-rows (counted in no row): {len(outside)} "
+          f"[pre-span {len(pre)}, gap {len(gap)}, post-span {len(post)}]"
+          + (f" | untimestamped chat calls dropped: {len(untimestamped)}"
+             if untimestamped else "")
+          + (f" | latency-less receipts reconstructed (latency=0): "
+             f"{len(latency_less)}" if latency_less else "")
+          + (f" | non-chat POSTs excluded: {len(non_chat_post)}"
+             if non_chat_post else ""))
+    for w in attribution_warnings:
+        print(f"[referee] {HARNESS} {tid}: WARN {w}")
 
     # F109/F114: ONE JUDGED ROW PER REPLICA. Each replica is an independent
     # attempt, so it gets its own verdict; analyze.py aggregates k/n.
@@ -276,6 +360,7 @@ for t in tasks:
             "replica": row.get("replica", 0),
             "run_batch": RUN_BATCH,
             "iso_reps": ISO_REPS,
+            "attribution_warnings": attribution_warnings,
             "sample": bool(__import__("os").environ.get("ISO_SAMPLE") == "1"),
         })
         print(f"[referee] {HARNESS} {tid}: pass_f72={pass_f72} "

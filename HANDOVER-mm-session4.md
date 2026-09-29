@@ -64,8 +64,11 @@ twice mid-audit — freeze the tree before asking for a re-audit.
   `audit_capture_run.sh`; `test_evidence_retention.py` 14/14 (RED-first). The
   golem/langgraph token columns still need a clean re-run to become
   auditable.
-- **F127** (consumer robustness: overlap/gap/non-chat/tolerance gaps) —
-  registered; belongs with the Phase-2 harness work.
+- **F127** (consumer robustness) — **FIXED 2026-09-28**: single-owner
+  overlaps, named outside classes, chat-only sums, named tolerance in the
+  audit, `attribution_warnings` persisted in rows;
+  `test_consumer_robustness.py` 16/16 (RED-first). `analyze.py` gained
+  `ISO_BATCHES` for the re-publish scope.
 - **Phase 2** (`X-Iso-*` call tags in
   `dsh-lite-cpp/include/dshlite/llm_client.hpp`) — needs coordination with
   the payload-draft stream holding that tree.

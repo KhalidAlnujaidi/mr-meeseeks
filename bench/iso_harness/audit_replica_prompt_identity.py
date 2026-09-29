@@ -148,17 +148,37 @@ def main() -> int:
     # the pre-roll warmup into replica 0 (observed on the real T10 capture:
     # [4,2,4] against a truth of [3,3,3]). On the receipt side each request
     # is received while exactly one row scope is live.
+    #
+    # F127 hardening: an entry with no usable timestamp is NAMED and dropped
+    # (previously a raw KeyError), and a latency-less receipt is NAMED before
+    # being reconstructed with latency 0. Neither is silent.
     def attributed(e):
-        if e.get("req_ts_ms") is not None:
-            return e["req_ts_ms"], "exact"
-        return e["ts_ms"] - (e.get("latency_ms") or 0), "inferred"
+        r = e.get("req_ts_ms")
+        if r:
+            return r, "exact"
+        t = e.get("ts_ms")
+        if t is None:
+            return None, "untimestamped"
+        return t - (e.get("latency_ms") or 0), "inferred"
 
-    att = [(e, *attributed(e)) for e in chat]
+    att_all = [(e, *attributed(e)) for e in chat]
+    untimestamped = [e for e, _, m in att_all if m == "untimestamped"]
+    latency_less = [e for e, a, m in att_all
+                    if m == "inferred" and not e.get("latency_ms")]
+    if untimestamped:
+        print(f"untimestamped chat entries dropped (no ts_ms/req_ts_ms): "
+              f"{len(untimestamped)}")
+    if latency_less:
+        print(f"latency-less receipts reconstructed (latency=0): "
+              f"{len(latency_less)}")
+    att = [(e, a, m) for e, a, m in att_all if a is not None]
     modes = {m for _, _, m in att}
     if modes == {"exact"}:
         mode_label = "exact (req_ts_ms)"
     elif modes == {"inferred"}:
         mode_label = "window-inferred (estimate: true receipt floor in {est-1, est, est+1})"
+    elif not modes:
+        mode_label = "none (no attributable chat calls)"
     else:
         mode_label = "mixed (exact where req_ts_ms was logged)"
     print(f"attribution-mode={mode_label}")

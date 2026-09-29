@@ -42,7 +42,18 @@ DIAGNOSTIC_BATCHES = [
 diag_batches = sorted({r.get("run_batch") for r in all_rows
                        if r.get("run_batch") in DIAGNOSTIC_BATCHES})
 rows = [r for r in all_rows if r.get("run_batch") not in DIAGNOSTIC_BATCHES]
-n_excluded = len(all_rows) - len(rows)
+n_excluded = len(all_rows) - len(rows)   # diagnostic exclusions (F120 report)
+
+# F124/F125 re-publish: an INCLUSION filter for re-publishing from a chosen
+# batch set. The telemetry file keeps every judged row forever (F111 adds,
+# never overwrites), so a clean re-publish must be able to scope itself to
+# the clean batch without touching the file. Rows from other batches stay in
+# the file and are reported as excluded (visible, never silent — F120).
+# Applies ON TOP of the diagnostic exclusion (n_excluded above is not
+# affected by this filter — it reports the F120 drop only).
+SCORED_BATCHES = [b for b in _os.environ.get("ISO_BATCHES", "").split(",") if b]
+if SCORED_BATCHES:
+    rows = [r for r in rows if r.get("run_batch") in SCORED_BATCHES]
 
 CORE = ["golem", "langgraph", "smolagents"]  # always shown, even with 0 rows
 harnesses = sorted({r["harness_name"] for r in rows} | set(CORE))
@@ -135,6 +146,14 @@ if batches:
     out.append("")
     out.append(f"> Measurement batches included: {', '.join(batches)} "
                "(each judged row carries its batch and replica index, F111).")
+if SCORED_BATCHES:
+    _excl = [r for r in all_rows
+             if r.get("run_batch") not in DIAGNOSTIC_BATCHES
+             and r.get("run_batch") not in SCORED_BATCHES]
+    out.append(f"> **Batch filter (ISO_BATCHES) ACTIVE:** only rows from "
+               f"{', '.join(SCORED_BATCHES)} enter this report; "
+               f"{len(_excl)} row(s) from other scored batches are excluded "
+               f"(re-publish scope — F124/F125).")
 # F120: exclusion must be VISIBLE. A diagnostic batch that is dropped from the
 # scored columns is named here with its row count and harness/task footprint,
 # so a reader can see it existed and was not scored. Never silently dropped.

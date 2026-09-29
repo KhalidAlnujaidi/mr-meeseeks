@@ -917,10 +917,20 @@ one sample per cell, presented as a capability.
   inside a row is summed; (e) the warnings are NOT persisted in the appended
   rows, so a jsonl consumer sees inflated/dropped sums with no marker;
   (f) the audit raises a raw `KeyError` on an entry without `ts_ms` while the
-  referee silently treats latency-less entries as latency 0. **Registered,
-  NOT fixed** — no surviving capture has overlapping/gapped rows; the fix
-  belongs with the Phase-2 harness work (persist per-row attribution
-  provenance + named tolerance).
+  referee silently treats latency-less entries as latency 0. **FIXED
+  (2026-09-28):** every class is now consumed BY NAME and never silently —
+  overlapping rows are single-owned (first-match rule, per-call NAMED);
+  outside calls are classified (pre-span / gap / post-span); entries with no
+  usable timestamp are named and dropped; latency-less receipts are named
+  before being reconstructed with latency 0; only chat-completion POSTs are
+  summed (non-chat POSTs named); the claim self-check keys by
+  ts_ms+req_ts_ms+path; and every warning is PERSISTED in each judged row
+  (`attribution_warnings`) — the audit names the same classes instead of
+  crashing. RED-first: `test_consumer_robustness.py` (16 checks; 0 passed /
+  16 failed against the pre-fix consumers) → 16/16 green. Companion:
+  `analyze.py` gained `ISO_BATCHES` (an inclusion filter for re-publishing
+  from a chosen batch set; the F120 diagnostic exclusion is untouched and
+  the filter is reported visibly in the table header).
 
 ## Layout
 
