@@ -932,6 +932,25 @@ one sample per cell, presented as a capability.
   from a chosen batch set; the F120 diagnostic exclusion is untouched and
   the filter is reported visibly in the table header).
 
+## F128 — golem-runner SIGABRT on the gate-refused / resolicit path
+
+- **F128** — **The golem runner aborts (SIGABRT, rc=134) when the safety
+  gate refuses a first attempt and the runner resolicits.** Observed live in
+  `REPS3-FULL-CLEAN-2`, golem/T3 rep 3:
+  `Assertion failed: (it != m_value.object->end()), function operator[],
+  file json.hpp, line 2135.` — a `const json::operator[]` read of a key that
+  does not exist (nlohmann/json), i.e. the refusal/resolicit path reads a
+  response field with `operator[]` instead of `.at()`/`.value()`/
+  `.contains()`. Trigger is nondeterministic — it needs the model to trip the
+  gate: the old batch's T3 had zero refusals (3/3 verified, no crash), the
+  new batch refused in rep 1 (`gate-refused exits=1 resolicits=1`) and
+  aborted in rep 3. Impact: the cell is marked NOT-RUN (F106) and the
+  crashed runner artifact (`runner-golem-T3-REPS3-FULL-CLEAN-2.json.crashed`)
+  plus its stdout are retained (F125) — the row is honest, but the crash is
+  on the SAFETY path, which is the worst place for one. **Registered, NOT
+  fixed** — fix = locate the missing-key read, switch to `.value()`/`.at()`,
+  RED-first regression driven by a gate-refusal fixture.
+
 ## Layout
 
 ```
