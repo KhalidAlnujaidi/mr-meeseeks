@@ -403,3 +403,20 @@ the rest:
 - **Discovery (documented, not fixed here):** colibri engine open calls
   exit() itself on missing config.json — a bogus modelDir cannot be an
   error-return assertion in tests (test_abi.cpp notes it).
+- **F86 (prefix reuse, implemented, live check pending):** AbiClient
+  re-prefilled the whole flattened history on every post(), so turn N
+  paid for turns 1..N-1 again. The colibri segment adapters require
+  contiguous positions (no truncate), so reuse goes through the ABI's
+  own snapshot/restore: after prefilling all but the last prompt token,
+  the client snapshots the session into a bounded in-memory checkpoint
+  (`prefixCacheMaxBytes`, default 512 MiB, about 2k OLMoE tokens). The
+  next post() restores it when the checkpoint ids are a strict prefix of
+  the new prompt and prefills only the rest; anything else (compaction,
+  a different brief) falls back to a full prefill. The last prompt token
+  is excluded because it can retokenize once text follows it. F77 is
+  kept: any failed post() destroys the session (the checkpoint is a
+  checksummed copy and survives). Contract deltas: reused sessions are
+  sized to the adapter context (restore requires matching
+  context_tokens); the checkpoint costs up to prefixCacheMaxBytes of RAM
+  outside the engine's memory_limit_bytes. `prefixReuse=false` restores
+  per-call sessions.

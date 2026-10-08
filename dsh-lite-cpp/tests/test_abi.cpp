@@ -105,6 +105,23 @@ void offlineSection() {
     expect(base, "taxonomy: AbiCancelledError derives from AbiError");
   }
 
+  // F86 prefix reuse: a checkpoint serves only a strict, exact prefix.
+  {
+    using V = std::vector<std::int32_t>;
+    expect(AbiClient::reusablePrefix({1, 2, 3}, {1, 2, 3, 4, 5}) == 3,
+           "F86: strict prefix => reuse checkpoint length");
+    expect(AbiClient::reusablePrefix({1, 2, 3}, {1, 2, 3}) == 0,
+           "F86: identical prompt => 0 (one token must still run for select)");
+    expect(AbiClient::reusablePrefix({1, 2, 3}, {1, 9, 3, 4}) == 0,
+           "F86: divergence inside the checkpoint => 0 (full prefill)");
+    expect(AbiClient::reusablePrefix({1, 2, 3, 4}, {1, 2}) == 0,
+           "F86: checkpoint longer than prompt => 0");
+    expect(AbiClient::reusablePrefix(V{}, {1, 2}) == 0, "F86: no checkpoint => 0");
+    AbiConfig d;
+    expect(d.prefixReuse && d.prefixCacheMaxBytes > 0,
+           "F86: prefix reuse on by default with a bounded checkpoint");
+  }
+
   // Router factory (F84): entry mapping — a bogus modelDir cannot be
   // used as a failure probe because the colibri engine open path calls
   // exit() itself on missing config.json (observed). So the mapping is
@@ -208,7 +225,44 @@ void liveSection(const std::string& modelDir) {
     fastClient.setTimeout(cfg.timeout);
     auto after = fastClient.post({{"user", "The capital of France is"}});
     expect(!after.content.empty() || after.usage.completionTokens > 0,
-           "[live] F77: client recovers after cancel (per-call sessions)");
+           "[live] F77: client recovers after cancel (session dropped on abort)");
+  }
+
+  // F86: a multi-turn history decodes token-identically with and without
+  // prefix reuse, and turn 2 restores turn 1's prompt from the checkpoint.
+  {
+    AbiConfig off = cfg;
+    off.prefixReuse = false;
+    AbiClient plain(off);
+    AbiClient reusing(cfg);
+    std::vector<Message> history = {{"system", "You are terse."},
+                                    {"user", "Name a primary color."}};
+    auto p1 = plain.post(history);
+    auto r1 = reusing.post(history);
+    expect(r1.content == p1.content && reusing.lastReusedTokens() == 0,
+           "[live] F86: turn 1 identical, nothing reused yet");
+    history.push_back({"assistant", r1.content});
+    history.push_back({"user", "Name another one."});
+    const auto t0 = std::chrono::steady_clock::now();
+    auto p2 = plain.post(history);
+    const auto t1 = std::chrono::steady_clock::now();
+    auto r2 = reusing.post(history);
+    const auto t2 = std::chrono::steady_clock::now();
+    expect(r2.content == p2.content, "[live] F86: turn 2 token-identical with reuse");
+    expect(reusing.lastReusedTokens() > 0 &&
+               reusing.lastReusedTokens() < static_cast<std::size_t>(r2.usage.promptTokens),
+           "[live] F86: turn 2 restored a prefix from the checkpoint");
+    expect(r2.usage.promptTokens == p2.usage.promptTokens,
+           "[live] F86: prompt usage still counts every prompt token");
+    using ms = std::chrono::milliseconds;
+    std::cout << "[live] F86 turn 2: reused " << reusing.lastReusedTokens() << "/"
+              << r2.usage.promptTokens << " prompt tokens; plain "
+              << std::chrono::duration_cast<ms>(t1 - t0).count() << " ms, reuse "
+              << std::chrono::duration_cast<ms>(t2 - t1).count() << " ms\n";
+    // History rewrite (compaction): the checkpoint no longer matches.
+    auto r3 = reusing.post({{"user", "Unrelated question?"}});
+    expect(reusing.lastReusedTokens() == 0 && r3.usage.completionTokens > 0,
+           "[live] F86: rewritten history falls back to a full prefill");
   }
 }
 
