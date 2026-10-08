@@ -59,8 +59,10 @@ include/dshlite/abi_client.hpp  Module 3a-native: direct C ABI backend
 src/abi_client.cpp              (libcolibri_segment_edge.a in-process decode,
 src/abi_probe.cpp                 zero serve/Python/HTTP/IPC; opts.memory_
                                  limit_bytes wired from C++; should_cancel
-                                 = host wall-clock firewall; per-call
-                                 sessions (F77); typed AbiCancelledError/
+                                 = host wall-clock firewall; session
+                                 dropped on abort (F77); F86 prefix
+                                 reuse via snapshot/restore checkpoint;
+                                 typed AbiCancelledError/
                                  AbiContextOverflowError; honest in-process
                                  usage counts; F80 no chat template delta)
 include/dshlite/router.hpp      Module 3c: Multi-Engine Local Router (Gap 1)

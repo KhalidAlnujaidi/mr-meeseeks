@@ -1,7 +1,8 @@
 // abi_client.cpp — native Colibri C ABI backend implementation.
 // Decode loop lifted from the proven src/abi_probe.cpp spike; lifecycle
-// reshaped for ILlmPoster use: engines live for the client, sessions are
-// per-call (F77 — a firewall abort cannot corrupt long-lived state).
+// reshaped for ILlmPoster use: engines live for the client. The session
+// lives across calls only for F86 prefix reuse; any failed post() drops
+// it (F77 — a firewall abort cannot corrupt long-lived state).
 
 #include "dshlite/abi_client.hpp"
 
@@ -74,10 +75,64 @@ std::string AbiClient::flattenMessages(const std::vector<Message>& messages) {
   return flat;
 }
 
+std::size_t AbiClient::reusablePrefix(const std::vector<std::int32_t>& checkpoint,
+                                      const std::vector<std::int32_t>& prompt) {
+  if (checkpoint.empty() || checkpoint.size() >= prompt.size()) return 0;
+  return std::equal(checkpoint.begin(), checkpoint.end(), prompt.begin())
+             ? checkpoint.size()
+             : 0;
+}
+
+namespace {
+
+// Snapshot sink: appends into a byte buffer, aborting the snapshot (a
+// read-only operation) once the configured cap would be exceeded.
+struct SnapshotSink {
+  std::vector<unsigned char>* bytes;
+  std::uint64_t cap;
+  static int write(void* userData, const void* data, size_t size) {
+    auto* self = static_cast<SnapshotSink*>(userData);
+    if (self->bytes->size() + size > self->cap) return 1;
+    const auto* p = static_cast<const unsigned char*>(data);
+    self->bytes->insert(self->bytes->end(), p, p + size);
+    return 0;
+  }
+};
+
+struct SnapshotSource {
+  const std::vector<unsigned char>* bytes;
+  size_t offset = 0;
+  static int read(void* userData, void* data, size_t size) {
+    auto* self = static_cast<SnapshotSource*>(userData);
+    if (size > self->bytes->size() - self->offset) return 1;
+    std::memcpy(data, self->bytes->data() + self->offset, size);
+    self->offset += size;
+    return 0;
+  }
+};
+
+}  // namespace
+
 struct AbiClient::Impl {
   ColiEdgeEngine* edge = nullptr;
   ColiSegmentEngine* segment = nullptr;
   ColiEdgeCapabilities edgeCap{};
+  // F86: the live session, plus a checksummed KV checkpoint of
+  // checkpointIds (the previous prompt minus its last token). The
+  // checkpoint is an immutable copy, so it survives a dropped session.
+  ColiSegmentSession* session = nullptr;
+  std::vector<unsigned char> checkpoint;
+  std::vector<std::int32_t> checkpointIds;
+
+  void dropSession() {
+    if (session != nullptr) coli_segment_session_destroy(session);
+    session = nullptr;
+  }
+  void dropCheckpoint() {
+    checkpoint.clear();
+    checkpoint.shrink_to_fit();
+    checkpointIds.clear();
+  }
 };
 
 AbiClient::AbiClient(AbiConfig cfg) : cfg_(std::move(cfg)) {
@@ -139,6 +194,7 @@ AbiClient::AbiClient(AbiConfig cfg) : cfg_(std::move(cfg)) {
 
 AbiClient::~AbiClient() {
   if (!impl_) return;
+  impl_->dropSession();  // segment close fails while a session is alive
   if (impl_->segment != nullptr) {
     char error[512] = {0};
     (void)coli_segment_engine_close(impl_->segment, error, sizeof(error));
@@ -185,20 +241,45 @@ LlmResponse AbiClient::post(const std::vector<Message>& messages) {
     throw AbiError(std::string("tokenize (fill): ") + error);
   }
 
-  // Per-call session (F77): a firewall abort destroys ONLY this session.
-  ColiSegmentSessionOptions sessOpts{};
-  sessOpts.struct_size = sizeof(sessOpts);
-  sessOpts.context_tokens = static_cast<std::uint32_t>(needed);
-  ColiSegmentSession* session = nullptr;
-  if (coli_segment_session_create(impl_->segment, &sessOpts, &session, error,
-                                  sizeof(error)) != 0) {
-    throw AbiError(std::string("session_create: ") + error);
-  }
-  // Session guard: destroyed on EVERY exit path, including throws.
+  // F86: how much of this prompt the previous prompt's checkpoint covers.
+  const size_t reuse =
+      cfg_.prefixReuse ? reusablePrefix(impl_->checkpointIds, promptIds) : 0;
+  lastReused_ = 0;
+
+  // Session guard: on EVERY failed exit (throws included) the session is
+  // destroyed, so the next post() starts from a clean session (F77). With
+  // prefixReuse off it is also destroyed on success (per-call sessions).
   struct SessionGuard {
-    ColiSegmentSession* s;
-    ~SessionGuard() { coli_segment_session_destroy(s); }
-  } guard{session};
+    Impl* impl;
+    bool keep = false;
+    ~SessionGuard() { if (!keep) impl->dropSession(); }
+  } guard{impl_.get()};
+
+  // Reused sessions are sized to the adapter context: a restore requires
+  // the same context_tokens the checkpoint was taken with.
+  if (reuse == 0) impl_->dropSession();  // fresh prefill starts at position 0
+  if (impl_->session == nullptr) {
+    ColiSegmentSessionOptions sessOpts{};
+    sessOpts.struct_size = sizeof(sessOpts);
+    sessOpts.context_tokens = cfg_.prefixReuse
+                                  ? maxContextTokens_
+                                  : static_cast<std::uint32_t>(needed);
+    if (coli_segment_session_create(impl_->segment, &sessOpts, &impl_->session,
+                                    error, sizeof(error)) != 0) {
+      impl_->session = nullptr;
+      throw AbiError(std::string("session_create: ") + error);
+    }
+  }
+  ColiSegmentSession* session = impl_->session;
+  if (reuse > 0) {
+    SnapshotSource src{&impl_->checkpoint};
+    if (coli_segment_restore(session, &SnapshotSource::read, &src, error,
+                             sizeof(error)) != 0) {
+      impl_->dropCheckpoint();  // a checkpoint that will not restore is useless
+      throw AbiError(std::string("restore (prefix reuse): ") + error);
+    }
+    lastReused_ = reuse;
+  }
 
   // F79: activation buffer overflow check before allocation.
   const size_t rowBytes = static_cast<size_t>(stateWidth_) * sizeof(float);
@@ -222,34 +303,62 @@ LlmResponse AbiClient::post(const std::vector<Message>& messages) {
   run.should_cancel = &WallClockFirewall::hit;
   run.cancel_user_data = &fw;
 
-  for (size_t base = 0; base < promptCount; base += chunk) {
-    const size_t rows = std::min(chunk, promptCount - base);
-    embed.rows = static_cast<std::uint32_t>(rows);
-    embed.token_ids = promptIds.data() + base;
-    embed.token_count = rows;
-    embed.output = in.data();
-    embed.output_bytes = rows * rowBytes;
-    if (coli_edge_embed(impl_->edge, &embed, error, sizeof(error)) != 0) {
-      if (fw.tripped.load()) throw AbiCancelledError("wall-clock firewall tripped during embed (prefill)");
-      throw AbiError(std::string("embed (prefill): ") + error);
+  // Runs prompt rows [begin, end); `out` then holds the final chunk's
+  // activations and the return value is that chunk's row count.
+  auto prefillRange = [&](size_t begin, size_t end) -> size_t {
+    size_t rows = 0;
+    for (size_t base = begin; base < end; base += chunk) {
+      rows = std::min(chunk, end - base);
+      embed.rows = static_cast<std::uint32_t>(rows);
+      embed.token_ids = promptIds.data() + base;
+      embed.token_count = rows;
+      embed.output = in.data();
+      embed.output_bytes = rows * rowBytes;
+      if (coli_edge_embed(impl_->edge, &embed, error, sizeof(error)) != 0) {
+        if (fw.tripped.load()) throw AbiCancelledError("wall-clock firewall tripped during embed (prefill)");
+        throw AbiError(std::string("embed (prefill): ") + error);
+      }
+      run.rows = static_cast<std::uint32_t>(rows);
+      run.position = static_cast<std::uint64_t>(base);
+      run.token_ids = promptIds.data() + base;
+      run.token_count = rows;
+      run.input = in.data();
+      run.input_bytes = rows * rowBytes;
+      run.output = out.data();
+      run.output_bytes = rows * rowBytes;
+      if (coli_segment_run(session, &run, error, sizeof(error)) != 0) {
+        if (fw.tripped.load()) throw AbiCancelledError("wall-clock firewall tripped during segment_run (prefill)");
+        throw AbiError(std::string("segment_run (prefill): ") + error);
+      }
     }
-    run.rows = static_cast<std::uint32_t>(rows);
-    run.position = static_cast<std::uint64_t>(base);
-    run.token_ids = promptIds.data() + base;
-    run.token_count = rows;
-    run.input = in.data();
-    run.input_bytes = rows * rowBytes;
-    run.output = out.data();
-    run.output_bytes = rows * rowBytes;
-    if (coli_segment_run(session, &run, error, sizeof(error)) != 0) {
-      if (fw.tripped.load()) throw AbiCancelledError("wall-clock firewall tripped during segment_run (prefill)");
-      throw AbiError(std::string("segment_run (prefill): ") + error);
+    return rows;
+  };
+
+  size_t lastChunkRows = 0;
+  if (cfg_.prefixReuse) {
+    // Checkpoint everything but the last prompt token: the next turn's
+    // prompt extends this one, and only its final token can retokenize
+    // differently once more text follows it.
+    const size_t stable = promptCount - 1;
+    prefillRange(reuse, stable);
+    if (stable > reuse) {
+      impl_->dropCheckpoint();
+      SnapshotSink sink{&impl_->checkpoint, cfg_.prefixCacheMaxBytes};
+      if (coli_segment_snapshot(session, &SnapshotSink::write, &sink, error,
+                                sizeof(error)) == 0) {
+        impl_->checkpointIds.assign(promptIds.begin(),
+                                    promptIds.begin() + static_cast<std::ptrdiff_t>(stable));
+      } else {
+        impl_->dropCheckpoint();  // over the cap: no reuse next turn, not an error
+      }
     }
+    lastChunkRows = prefillRange(stable, promptCount);
+  } else {
+    lastChunkRows = prefillRange(0, promptCount);
   }
 
   // Select next token from the LAST prompt row's output activation
   // (final chunk's tail row).
-  const size_t lastChunkRows = ((promptCount - 1) % chunk) + 1;
   std::int32_t predicted = -1;
   float score = 0.0f;
   ColiEdgeSelectRequest select{};
@@ -355,6 +464,7 @@ LlmResponse AbiClient::post(const std::vector<Message>& messages) {
     total_.totalTokens += resp.usage.totalTokens;
     ++requests_;
   }
+  guard.keep = cfg_.prefixReuse;  // F86: the session survives a successful post()
   return resp;
 }
 

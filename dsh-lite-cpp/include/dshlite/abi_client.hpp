@@ -61,6 +61,13 @@ struct AbiConfig {
   /// inside this deadline; the should_cancel callback aborts it.
   std::chrono::milliseconds timeout{120000};
   bool stopOnEos = true;                ///< honored only when caps.eos >= 0 (F76)
+  /// F86 prefix reuse: keep one session across post() calls and restore a
+  /// KV checkpoint of the previous prompt (minus its last token) instead
+  /// of re-prefilling the shared history. false = F77 per-call sessions.
+  bool prefixReuse = true;
+  /// Upper bound on the in-memory checkpoint (a copy of the prefix KV).
+  /// A prompt whose KV would exceed it is simply not checkpointed.
+  std::uint64_t prefixCacheMaxBytes = 512ull * 1024 * 1024;
 };
 
 /// Base type for every native-lane failure. what() carries the ABI
@@ -100,8 +107,9 @@ class AbiClient : public ILlmPoster {
  public:
   /// Opens edge+segment engines against cfg.modelDir. Throws AbiError
   /// (with the engine's verbatim message) when registration or open
-  /// fails. Engines live for the client's lifetime; sessions are
-  /// per-call (F77 cancel safety).
+  /// fails. Engines live for the client's lifetime. With prefixReuse the
+  /// session lives across calls but is destroyed on any failed post()
+  /// (F77 cancel safety); otherwise sessions are per-call.
   explicit AbiClient(AbiConfig cfg);
   ~AbiClient() override;
   AbiClient(const AbiClient&) = delete;
@@ -118,6 +126,17 @@ class AbiClient : public ILlmPoster {
 
   /// F80 flattening, exposed for tests: "role: content" lines, in order.
   static std::string flattenMessages(const std::vector<Message>& messages);
+
+  /// F86: number of leading prompt tokens a checkpoint over `checkpoint`
+  /// can serve — checkpoint.size() when it is a strict prefix of prompt
+  /// (at least one prompt token must still run to produce a row to
+  /// select from), else 0. Exposed for tests.
+  static std::size_t reusablePrefix(const std::vector<std::int32_t>& checkpoint,
+                                    const std::vector<std::int32_t>& prompt);
+
+  /// F86: prompt tokens restored from the checkpoint by the last post()
+  /// (0 = full prefill). Prompt usage still counts every prompt token.
+  std::size_t lastReusedTokens() const { return lastReused_; }
 
   /// Per-call firewall budget is derived from cfg.timeout at each post();
   /// adjust it at runtime (e.g. F77 recovery tests). Thread-safety: same
@@ -162,6 +181,7 @@ class AbiClient : public ILlmPoster {
   std::uint32_t maxContextTokens_ = 0;
   std::uint32_t maxBatchRows_ = 0;  // 0 = adapter advertised no cap
   std::int32_t eosTokenId_ = -1;
+  std::size_t lastReused_ = 0;
   mutable std::mutex mu_;  // guards total_/requests_ (F83 aggregation)
   TokenUsage total_{};
   long requests_ = 0;
